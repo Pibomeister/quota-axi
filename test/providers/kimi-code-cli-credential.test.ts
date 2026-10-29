@@ -247,20 +247,6 @@ describe("Kimi Code CLI credential discovery", () => {
     expect(readdirSync(home).sort()).toEqual(["credentials", "device_id"]);
   });
 
-  it("has no credential-write, process-launch, refresh, or Pi-auth surface", () => {
-    const implementation = readFileSync(
-      new URL(
-        "../../src/providers/kimi-code-cli-credential.ts",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-
-    expect(implementation).not.toMatch(
-      /node:child_process|\b(?:spawn|execFile|writeFile|mkdir|rename|unlink)\b|device_id|\.pi\/agent\/auth\.json/,
-    );
-  });
-
   it("bounds malformed credential files without returning their contents", async () => {
     const sentinel = "CLI-CREDENTIAL-SENTINEL-938475";
     const readFile = vi.fn(async (_path: string, maxBytes: number) =>

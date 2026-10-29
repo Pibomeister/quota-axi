@@ -413,6 +413,29 @@ describe("Pi Kimi credential broker", () => {
   });
 
   it.each([
+    ["an empty", ""],
+    ["a blank", "   "],
+    ["a null", null],
+    ["a non-string", 42],
+  ])(
+    "reports an expired OAuth record with %s refresh token as unrefreshable",
+    async (_label, refresh) => {
+      const fixture = piOauthFixture({
+        access: "pi-oauth-blank-refresh-access-131",
+        refresh,
+        expires: Date.now() - 1_000,
+      });
+
+      await expect(createPiKimiCredentialBroker().resolve()).resolves.toEqual({
+        status: "expired",
+        refreshable: false,
+        credential: "pi-oauth-blank-refresh-access-131",
+      });
+      expectSnapshotEqual(fixture.authPath, fixture.before);
+    },
+  );
+
+  it.each([
     ["absent access token", { refresh: "r", expires: Date.now() + 3_600_000 }],
     ["environment reference", { access: "$KIMI_OAUTH_ACCESS" }],
     ["unparseable expiry", { access: "usable-access", expires: "soon" }],

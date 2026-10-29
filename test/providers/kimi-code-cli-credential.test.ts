@@ -82,7 +82,7 @@ describe("Kimi Code CLI credential discovery", () => {
       accessToken?: string;
       /**
        * Stored-expired resolutions report whether the record also carries a
-       * refresh token; presence only, the value is never read.
+       * nonempty string refresh token; the value is never retained.
        */
       refreshable?: boolean;
     }> = [
@@ -119,6 +119,56 @@ describe("Kimi Code CLI credential discovery", () => {
         status: "expired",
         accessToken: "token",
         refreshable: true,
+      },
+      {
+        payload: {
+          access_token: "token",
+          refresh_token: "",
+          expires_at: NOW / 1_000 - 1,
+        },
+        status: "expired",
+        accessToken: "token",
+        refreshable: false,
+      },
+      {
+        payload: {
+          access_token: "token",
+          refresh_token: "   ",
+          expires_at: NOW / 1_000 - 1,
+        },
+        status: "expired",
+        accessToken: "token",
+        refreshable: false,
+      },
+      {
+        payload: {
+          access_token: "token",
+          refresh_token: null,
+          expires_at: NOW / 1_000 - 1,
+        },
+        status: "expired",
+        accessToken: "token",
+        refreshable: false,
+      },
+      {
+        payload: {
+          access_token: "token",
+          refresh_token: 42,
+          expires_at: NOW / 1_000 - 1,
+        },
+        status: "expired",
+        accessToken: "token",
+        refreshable: false,
+      },
+      {
+        payload: {
+          access_token: "token",
+          refresh_token: { nested: "object" },
+          expires_at: NOW / 1_000 - 1,
+        },
+        status: "expired",
+        accessToken: "token",
+        refreshable: false,
       },
     ];
 

@@ -2497,6 +2497,7 @@ describe("default TOON decision blocks", () => {
     expect(toonRows(output, "quota").map((row) => row.slice(0, 3))).toEqual([
       ["cursor", "all_models", "58"],
       ["cursor", "grok_bot", "62"],
+      ["cursor", "pool:auto", "58"],
     ]);
   });
 

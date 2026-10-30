@@ -722,6 +722,18 @@ function kimiSemantics(
  * the conservative reading: the effective remaining is the minimum across them,
  * which never overstates headroom even if a window later turns out to be
  * independent. Grok Bot weekly usage is a separate Cursor-account resource.
+ *
+ * `all_models` stays that minimum, so a consumer that only knows it still sees
+ * the conservative bound. Cursor bills model usage from separate pools, and the
+ * minimum hides that one pool can have headroom while another is nearly spent,
+ * so the pools are also published as their own scopes after the older rows:
+ * `pool:auto` (Auto and Composer models, bounded by `auto_usage` and
+ * `included_usage`), `pool:api` (named API models, bounded by `api_usage`), and
+ * `pool:grok` (Grok models). The vendor payload does not say which window bills
+ * Grok models, so `pool:grok` is derived from `api_usage`, the pool third-party
+ * named models draw on. `spend_limit` is the dollar cap on spend past the
+ * included allowance. It is not a pool meter, so it bounds `all_models` only
+ * and stays out of the pool scopes, which keeps their selection measurable.
  */
 const CURSOR_IDE_WINDOW_IDS = [
   "included_usage",
@@ -730,6 +742,11 @@ const CURSOR_IDE_WINDOW_IDS = [
   "spend_limit",
 ];
 const CURSOR_GROK_BOT_WINDOW_ID = "grok_bot";
+const CURSOR_AUTO_POOL_WINDOW_IDS = ["included_usage", "auto_usage"];
+const CURSOR_API_POOL_WINDOW_ID = "api_usage";
+
+const CURSOR_POOL_NOTE =
+  "The pool:auto, pool:api, and pool:grok scopes report each billing pool on its own: pool:auto is bounded by the auto and included windows, pool:api by the API window, and pool:grok is derived from the API window because the vendor does not say which window bills Grok models. The spend-limit window bounds all_models only.";
 
 function cursorSemantics(
   windows: QuotaWindow[],
@@ -737,6 +754,10 @@ function cursorSemantics(
 ): QuotaSemantics {
   const ide = windows.filter(({ id }) => CURSOR_IDE_WINDOW_IDS.includes(id));
   const grokBot = windows.filter(({ id }) => id === CURSOR_GROK_BOT_WINDOW_ID);
+  const autoPool = windows.filter(({ id }) =>
+    CURSOR_AUTO_POOL_WINDOW_IDS.includes(id),
+  );
+  const apiPool = windows.filter(({ id }) => id === CURSOR_API_POOL_WINDOW_ID);
   const unresolved = windows.filter(
     ({ id }) =>
       !CURSOR_IDE_WINDOW_IDS.includes(id) && id !== CURSOR_GROK_BOT_WINDOW_ID,
@@ -748,18 +769,28 @@ function cursorSemantics(
   if (grokBot.length > 0) {
     effectiveAvailability.push(availability("grok_bot", grokBot, generatedAt));
   }
+  if (autoPool.length > 0) {
+    effectiveAvailability.push(
+      availability("pool:auto", autoPool, generatedAt),
+    );
+  }
+  if (apiPool.length > 0) {
+    effectiveAvailability.push(
+      availability("pool:api", apiPool, generatedAt),
+      availability("pool:grok", apiPool, generatedAt),
+    );
+  }
   if (unresolved.length > 0) {
     return {
       status: "partial",
-      description:
-        "Cursor's included, auto, API usage, and spend-limit windows jointly bound every model, so effective remaining is the minimum across those named windows. The Grok Bot weekly window is an independent resource. Unfamiliar windows are not folded into either bound, so they stay unresolved.",
+      description: `Cursor's included, auto, API usage, and spend-limit windows jointly bound every model, so effective remaining is the minimum across those named windows. The Grok Bot weekly window is an independent resource. Unfamiliar windows are not folded into either bound, so they stay unresolved. ${CURSOR_POOL_NOTE}`,
       effectiveAvailability,
       unresolvedWindowIds: unresolved.map(({ id }) => id),
     };
   }
   return knownSemantics(
     effectiveAvailability,
-    "Cursor's included, auto, API usage, and spend-limit windows jointly bound every model, so effective remaining is the minimum across those named windows. The Grok Bot weekly window is an independent resource.",
+    `Cursor's included, auto, API usage, and spend-limit windows jointly bound every model, so effective remaining is the minimum across those named windows. The Grok Bot weekly window is an independent resource. ${CURSOR_POOL_NOTE}`,
   );
 }
 

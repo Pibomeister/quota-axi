@@ -1249,19 +1249,12 @@ describe("quota semantics", () => {
       expect.objectContaining({
         scope: "pool:auto",
         status: "known",
-        effectivePercentRemaining: 58,
-        boundedBy: ["included_usage", "auto_usage"],
-        limitingWindowIds: ["included_usage"],
+        effectivePercentRemaining: 88,
+        boundedBy: ["auto_usage"],
+        limitingWindowIds: ["auto_usage"],
       }),
       expect.objectContaining({
         scope: "pool:api",
-        status: "known",
-        effectivePercentRemaining: 21,
-        boundedBy: ["api_usage"],
-        limitingWindowIds: ["api_usage"],
-      }),
-      expect.objectContaining({
-        scope: "pool:grok",
         status: "known",
         effectivePercentRemaining: 21,
         boundedBy: ["api_usage"],
@@ -1354,8 +1347,8 @@ describe("quota semantics", () => {
       expect.objectContaining({
         scope: "pool:auto",
         status: "known",
-        effectivePercentRemaining: 58,
-        boundedBy: ["included_usage", "auto_usage"],
+        effectivePercentRemaining: 88,
+        boundedBy: ["auto_usage"],
       }),
     ]);
   });
@@ -1386,12 +1379,6 @@ describe("quota semantics", () => {
         status: "known",
         effectivePercentRemaining: 4,
         boundedBy: ["grok_bot"],
-      }),
-      expect.objectContaining({
-        scope: "pool:auto",
-        status: "known",
-        effectivePercentRemaining: 58,
-        boundedBy: ["included_usage"],
       }),
     ]);
   });
@@ -1436,7 +1423,6 @@ describe("quota semantics", () => {
         "grok_bot",
         "pool:auto",
         "pool:api",
-        "pool:grok",
       ]);
       expect(scopes.get("all_models")).toMatchObject({
         status: "known",
@@ -1446,19 +1432,14 @@ describe("quota semantics", () => {
       });
       expect(scopes.get("pool:auto")).toMatchObject({
         status: "known",
-        effectivePercentRemaining: 90,
-        limitingWindowIds: ["included_usage"],
-        boundedBy: ["included_usage", "auto_usage"],
+        effectivePercentRemaining: 93,
+        limitingWindowIds: ["auto_usage"],
+        boundedBy: ["auto_usage"],
       });
       expect(scopes.get("pool:api")).toMatchObject({
         status: "known",
         effectivePercentRemaining: 2,
         limitingWindowIds: ["api_usage"],
-        boundedBy: ["api_usage"],
-      });
-      expect(scopes.get("pool:grok")).toMatchObject({
-        status: "known",
-        effectivePercentRemaining: 2,
         boundedBy: ["api_usage"],
       });
     });
@@ -1476,7 +1457,7 @@ describe("quota semantics", () => {
         status: "unknown",
         unmeasurableWindowIds: ["spend_limit"],
       });
-      for (const scope of ["pool:auto", "pool:api", "pool:grok"]) {
+      for (const scope of ["pool:auto", "pool:api"]) {
         const entry = scopes.get(scope);
         expect(entry?.boundedBy).not.toContain("spend_limit");
         expect(entry?.selection?.status).toBe("known");
@@ -1494,16 +1475,28 @@ describe("quota semantics", () => {
       expect(auto!).toBeGreaterThan(api!);
     });
 
-    it("derives pool:grok from the API window alone", () => {
-      const scopes = byScope(live);
+    it("keeps included_usage on all_models and out of the pools", () => {
+      const scopes = byScope([
+        window("included_usage", "monthly", 0, cycle),
+        window("auto_usage", "monthly", 60, cycle),
+        window("api_usage", "monthly", 50, cycle),
+      ]);
 
-      expect(scopes.get("pool:grok")).toEqual({
-        ...scopes.get("pool:api"),
-        scope: "pool:grok",
+      expect(scopes.get("all_models")).toMatchObject({
+        effectivePercentRemaining: 0,
+        limitingWindowIds: ["included_usage"],
+      });
+      expect(scopes.get("pool:auto")).toMatchObject({
+        effectivePercentRemaining: 60,
+        boundedBy: ["auto_usage"],
+      });
+      expect(scopes.get("pool:api")).toMatchObject({
+        effectivePercentRemaining: 50,
+        boundedBy: ["api_usage"],
       });
     });
 
-    it("omits a pool whose windows are not reported", () => {
+    it("omits a pool whose window is not reported", () => {
       const autoOnly = byScope([
         window("included_usage", "monthly", 58, cycle),
         window("auto_usage", "monthly", 88, cycle),
@@ -1511,14 +1504,13 @@ describe("quota semantics", () => {
       const apiOnly = byScope([window("api_usage", "monthly", 21, cycle)]);
 
       expect([...autoOnly.keys()]).toEqual(["all_models", "pool:auto"]);
-      expect([...apiOnly.keys()]).toEqual([
-        "all_models",
-        "pool:api",
-        "pool:grok",
-      ]);
-      expect(
-        byScope([window("spend_limit", "credits", 40)]).has("pool:auto"),
-      ).toBe(false);
+      expect([...apiOnly.keys()]).toEqual(["all_models", "pool:api"]);
+      expect([
+        ...byScope([window("included_usage", "monthly", 58, cycle)]).keys(),
+      ]).toEqual(["all_models"]);
+      expect([
+        ...byScope([window("spend_limit", "credits", 40)]).keys(),
+      ]).toEqual(["all_models"]);
     });
 
     it("keeps pool rows to recognized windows when an unfamiliar one is present", () => {
@@ -1535,7 +1527,7 @@ describe("quota semantics", () => {
       expect(
         scopes.find(({ scope }) => scope === "pool:auto")
           ?.effectivePercentRemaining,
-      ).toBe(90);
+      ).toBe(93);
       expect(
         scopes.find(({ scope }) => scope === "pool:api")
           ?.effectivePercentRemaining,

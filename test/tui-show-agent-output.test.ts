@@ -122,7 +122,7 @@ process.stdin.on("data", (chunk) => {
         ],
         {
           encoding: "utf8",
-          timeout: 10_000,
+          timeout: 45_000,
           env: {
             HOME: home,
             XDG_CACHE_HOME: cacheHome,

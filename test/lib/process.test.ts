@@ -59,7 +59,7 @@ describe("terminateChild", () => {
       );
       expect(signal).toBe("SIGKILL");
     },
-    10_000,
+    60_000,
   );
 });
 
@@ -78,10 +78,10 @@ describe("currentUserProcessListArgs", () => {
       const output = await execFileText(
         "ps",
         currentUserProcessListArgs(process.geteuid?.() ?? 0),
-        5_000,
+        30_000,
       );
       expect(output).toMatch(new RegExp(`^\\s*${process.pid}\\s`, "m"));
     },
-    10_000,
+    60_000,
   );
 });

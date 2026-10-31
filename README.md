@@ -35,13 +35,15 @@ $ npx -y quota-axi --provider claude,codex,cursor,copilot,grok,kimi,zai,agy
 bin: ~/.npm/_npx/.../quota-axi
 description: Report local agent-provider quota windows for routing-aware agents
 generatedAt: "2026-03-15T16:42:00.000Z"
-quota[12]{provider,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
+quota[14]{provider,scope,effectivePercentRemaining,spendPriority,runway,confidence,limitedBy,resetsAt}:
   claude,all_models,64,-0.3798,projected_exhaustion,established,seven_day,"2026-03-20T17:59:45.600Z"
   claude,seven_day_opus,64,0.3218,projected_exhaustion,established,seven_day,"2026-03-20T17:59:45.600Z"
   claude,"model:fable",64,-0.0932,projected_exhaustion,established,seven_day,"2026-03-20T17:59:45.600Z"
   codex,all_models,47,-0.2383,projected_exhaustion,established,weekly,"2026-03-19T09:54:28.800Z"
   codex,"model:gpt-5.1-codex",47,-0.1973,projected_exhaustion,established,weekly,"2026-03-19T09:54:28.800Z"
-  cursor,all_models,72,1.4067,through_reset,established,included_usage,"2026-04-01T00:00:00.000Z"
+  cursor,all_models,72,1.1928,through_reset,established,included_usage,"2026-04-01T00:00:00.000Z"
+  cursor,"pool:auto",84,1.2596,through_reset,established,auto_usage,"2026-04-01T00:00:00.000Z"
+  cursor,"pool:api",91,1.5404,through_reset,established,api_usage,"2026-04-01T00:00:00.000Z"
   grok,all_products,67,0.5778,through_reset,established,week,"2026-04-01T00:00:00.000Z"
   kimi,all_models,74,0.2484,through_reset,established,weekly,"2026-03-20T12:17:02.400Z"
   zai,all_models,50,-1.0046,projected_exhaustion,established,weekly,"2026-03-20T16:42:00.000Z"
@@ -706,7 +708,7 @@ Codex is the provider this applies to today. The vendor reports a named model li
 
 `quotaSemantics.status` is `known` only when quota-axi understands the relationships needed for the reported scopes. A non-definitive availability entry omits `effectivePercentRemaining`. Unfamiliar vendor windows produce `partial` or `unknown` semantics and are named in `unresolvedWindowIds`; an empty provider report is `unknown` without inventing an unresolved window.
 
-Cursor's IDE windows (`included_usage`, `auto_usage`, `api_usage`, and optional `spend_limit`) all draw on the same plan billing cycle, so quota-axi treats them as jointly bounding and reports an `all_models` effective remaining equal to the lowest of them. That is the conservative reading: it never overstates headroom. Grok Bot weekly usage is a separate Cursor-account meter reported as its own `grok_bot` scope, so it never lowers IDE headroom and IDE windows never mask Grok Bot exhaustion. An unfamiliar Cursor window is not folded into either bound and does not create a bound of its own - it stays named in `unresolvedWindowIds` and turns the provider's semantics `partial` while the recognized-window bounds remain. GitHub Copilot's window relationships are still unknown, so it reports no effective remaining.
+Cursor's IDE windows (`included_usage`, `auto_usage`, `api_usage`, and optional `spend_limit`) all draw on the same plan billing cycle, so quota-axi treats them as jointly bounding and reports an `all_models` effective remaining equal to the lowest of them. That is the conservative reading: it never overstates headroom. It also hides that one window can have headroom while another is nearly spent, so Cursor additionally reports two per-window scopes after the older rows: `pool:auto` reads `auto_usage` alone and `pool:api` reads `api_usage` alone. Each pool scope carries its own `selection.spendPriority`. The vendor has not confirmed this pool split, so treat a pool row as that window's reading, not as an established billing bound. `all_models` remains the jointly bounded row. `included_usage` stays a visible window and, like `spend_limit`, bounds `all_models` only. A pool scope appears only when its window is reported. Grok Bot weekly usage is a separate Cursor-account meter reported as its own `grok_bot` scope, so it never lowers IDE headroom and IDE windows never mask Grok Bot exhaustion. An unfamiliar Cursor window is not folded into any Cursor scope and does not create a bound of its own - it stays named in `unresolvedWindowIds` and turns the provider's semantics `partial` while the recognized-window bounds remain. GitHub Copilot's window relationships are still unknown, so it reports no effective remaining.
 
 Z.AI's `five_hour` and `weekly` usage windows jointly bound model usage and are reported as one `all_models` scope, while the `mcp_month` tool window is a separate resource reported as its own `tools` scope; a tool window near exhaustion therefore never lowers model headroom, and model windows never mask tool exhaustion. An unfamiliar or untrusted Z.AI window is not folded into either bound: it stays named in `unresolvedWindowIds`, turns the provider's semantics `partial`, and leaves both scopes non-definitive because it could add a bound to either.
 

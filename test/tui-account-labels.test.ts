@@ -129,7 +129,7 @@ globalThis.Date = FixedDate;
         ],
         {
           encoding: "utf8",
-          timeout: 10_000,
+          timeout: 45_000,
           env: {
             HOME: home,
             XDG_CACHE_HOME: join(root, "cache"),

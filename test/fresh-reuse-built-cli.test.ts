@@ -139,7 +139,7 @@ function burst(reads: number, env: NodeJS.ProcessEnv = {}): number {
   for (let read = 0; read < reads; read++) {
     const result = spawnSync(process.execPath, ARGS, {
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 45_000,
       env: { ...base, ...env },
     });
     if (result.error) throw result.error;

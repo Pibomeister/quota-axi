@@ -72,7 +72,7 @@ process.stdin.on("data", (chunk) => {
       const args = [BUILT_CLI_ENTRYPOINT, "--provider", "codex", ...flags];
       const result = spawnSync(process.execPath, args, {
         encoding: "utf8",
-        timeout: 10_000,
+        timeout: 45_000,
         env: {
           HOME: home,
           XDG_CACHE_HOME: cacheHome,

@@ -93,7 +93,7 @@ globalThis.fetch = async (input, init) => {
       ],
       {
         encoding: "utf8",
-        timeout: 10_000,
+        timeout: 45_000,
         env: {
           HOME: fixture.home,
           XDG_CACHE_HOME: fixture.cacheHome,

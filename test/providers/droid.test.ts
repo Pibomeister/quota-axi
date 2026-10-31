@@ -98,6 +98,31 @@ function resolvedSource(
   };
 }
 
+function brokenSource(name: string): DroidCredentialSource {
+  return {
+    name,
+    location: () => `~/${name}`,
+    resolve: () =>
+      Promise.resolve({
+        status: "structurally_invalid",
+        error: "droid_auth_undecryptable",
+      }),
+  };
+}
+
+const rejecting = (() =>
+  Promise.resolve(
+    new Response("{}", { status: 401 }),
+  )) as unknown as typeof globalThis.fetch;
+
+async function seedCache(source: DroidCredentialSource): Promise<void> {
+  const reading = await adapterWith([source], (() =>
+    Promise.resolve(
+      jsonResponse(limitsBody()),
+    )) as unknown as typeof globalThis.fetch).fetchQuota(OPTIONS);
+  writeCachedProviders([reading], new Date(NOW).toISOString());
+}
+
 function adapterWith(
   sources: DroidCredentialSource[],
   fetch: typeof globalThis.fetch,
@@ -181,19 +206,6 @@ describe("normalizeDroidPayload", () => {
     );
   });
 
-  it("derives the reset from secondsRemaining when windowEnd is absent", () => {
-    const body = limitsBody();
-    (body.limits as Record<string, Record<string, unknown>>).core!.weekly = {
-      usedPercent: 40,
-      windowEnd: null,
-      secondsRemaining: 3600,
-    };
-    const weekly = normalizeDroidPayload(body, NOW).windows.find(
-      ({ id }) => id === "droid_core_weekly",
-    );
-    expect(weekly?.resetsAt).toBe("2026-10-31T13:00:00.000Z");
-  });
-
   it("reports a window whose end has passed as rolled over, not as the stale figure", () => {
     const body = limitsBody();
     (body.limits as Record<string, Record<string, unknown>>).core!.monthly = {
@@ -243,6 +255,21 @@ describe("normalizeDroidPayload", () => {
     const body = limitsBody();
     delete (body.limits as Record<string, unknown>).standard;
     expect(() => normalizeDroidPayload(body, NOW)).toThrow("schema_invalid");
+  });
+
+  it.each([
+    ["an empty standard pool", { standard: {} }],
+    [
+      "renamed percentage fields in both pools",
+      {
+        standard: { fiveHour: { percent: 1 } },
+        core: { weekly: { percent: 2 } },
+      },
+    ],
+  ])("rejects %s as unreadable, never an empty reading", (_label, limits) => {
+    expect(() => normalizeDroidPayload(limitsBody({ limits }), NOW)).toThrow(
+      "schema_invalid",
+    );
   });
 
   it("reports a legacy token-allowance account as unavailable, never as zero", () => {
@@ -414,6 +441,164 @@ describe("Factory Droid adapter", () => {
     const report = await adapter.fetchQuota(OPTIONS);
     expect(report.state.status).not.toBe("auth_required");
     expect(report.state.authStatus).toBe("expired_refreshable");
+  });
+
+  it("treats a rejected unexpired token with a refresh token as revoked, and retires the cache", async () => {
+    const source = resolvedSource("cli-keychain", {
+      expired: false,
+      refreshable: true,
+    });
+    await seedCache(source);
+
+    const report = await adapterWith([source], rejecting).fetchQuota(OPTIONS);
+
+    expect(report.state).toMatchObject({
+      status: "auth_required",
+      authStatus: "unusable",
+      error: "droid_access_token_rejected",
+    });
+    expect(report.state.reason).toBeUndefined();
+    expect(report.windows).toEqual([]);
+    expect(
+      readCachedDroidProvider(droidCacheContextId("session", "user-1|org-1")),
+    ).toBeUndefined();
+  });
+
+  it("serves only the expired session's cache when a revoked sibling is also rejected", async () => {
+    const revoked = resolvedSource("env:FACTORY_API_KEY", {
+      kind: "api_key",
+      identity: "revoked-key",
+    });
+    const expired = resolvedSource("cli-keychain", {
+      expired: true,
+      refreshable: true,
+    });
+    await seedCache(revoked);
+
+    const report = await adapterWith([expired, revoked], rejecting).fetchQuota(
+      OPTIONS,
+    );
+
+    expect(report.state.authStatus).toBe("expired_refreshable");
+    expect(report.source).toBe("unavailable");
+    expect(report.windows).toEqual([]);
+  });
+
+  it("uses a live sibling when the stored token is expired", async () => {
+    const seen: string[] = [];
+    const fetch = vi.fn((_url: string, init: RequestInit) => {
+      const bearer = (init.headers as Record<string, string>).Authorization!;
+      seen.push(bearer);
+      return Promise.resolve(
+        bearer === "Bearer expired-token"
+          ? new Response("{}", { status: 401 })
+          : jsonResponse(limitsBody()),
+      );
+    });
+    const report = await adapterWith(
+      [
+        resolvedSource("cli-keychain", {
+          credential: "expired-token",
+          expired: true,
+          refreshable: true,
+        }),
+        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+      ],
+      fetch as unknown as typeof globalThis.fetch,
+    ).fetchQuota(OPTIONS);
+
+    expect(seen).toEqual([`Bearer ${API_KEY}`]);
+    expect(report.state).toMatchObject({
+      status: "fresh",
+      authStatus: "usable",
+    });
+    expect(report.windows).toHaveLength(6);
+  });
+
+  it("marks a broken store superseded by a working sibling without failing the reading", async () => {
+    const report = await adapterWith(
+      [
+        brokenSource("cli-keyfile"),
+        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+      ],
+      (() =>
+        Promise.resolve(
+          jsonResponse(limitsBody()),
+        )) as unknown as typeof globalThis.fetch,
+    ).fetchQuota(OPTIONS);
+
+    expect(report.state.status).toBe("fresh");
+    expect(report.attempts?.[0]).toMatchObject({
+      source: "cli-keyfile",
+      status: "failed",
+      error: "droid_auth_undecryptable",
+      credentialPresent: true,
+    });
+  });
+
+  it("reports a broken store rather than a sign-out when a sibling is rejected, and keeps the cache", async () => {
+    const sibling = resolvedSource("env:FACTORY_API_KEY", {
+      kind: "api_key",
+      identity: "old-key",
+    });
+    await seedCache(sibling);
+
+    const report = await adapterWith(
+      [brokenSource("cli-keyfile"), sibling],
+      rejecting,
+    ).fetchQuota(OPTIONS);
+
+    expect(report.state).toMatchObject({
+      status: "error",
+      error: "droid_auth_undecryptable",
+    });
+    expect(report.state.authStatus).toBeUndefined();
+    expect(
+      readCachedDroidProvider(droidCacheContextId("api-key", "old-key")),
+    ).toBeDefined();
+  });
+
+  it("stops at a transient failure instead of handing over to a sibling", async () => {
+    const fetch = vi.fn(() =>
+      Promise.resolve(new Response("{}", { status: 503 })),
+    );
+    const report = await adapterWith(
+      [
+        resolvedSource("cli-keychain"),
+        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+      ],
+      fetch as unknown as typeof globalThis.fetch,
+    ).fetchQuota(OPTIONS);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(report.state.error).toBe("provider_unavailable");
+    expect(
+      report.attempts?.map(({ source, status }) => [source, status]),
+    ).toEqual([
+      ["cli-keychain", "failed"],
+      ["env:FACTORY_API_KEY", "skipped"],
+    ]);
+  });
+
+  it("keeps the last reading when the vendor's meters stop parsing", async () => {
+    const source = resolvedSource("cli-keychain");
+    await seedCache(source);
+
+    const report = await adapterWith([source], (() =>
+      Promise.resolve(
+        jsonResponse(limitsBody({ limits: { standard: {} } })),
+      )) as unknown as typeof globalThis.fetch).fetchQuota(OPTIONS);
+    writeCachedProviders([report], new Date(NOW).toISOString());
+
+    expect(report.state).toMatchObject({
+      status: "stale",
+      error: "schema_invalid",
+    });
+    expect(report.source).toBe("cache");
+    expect(
+      readCachedDroidProvider(droidCacheContextId("session", "user-1|org-1"))
+        ?.windows,
+    ).toHaveLength(6);
   });
 
   it("reports a legacy account as unavailable with a usable credential", async () => {

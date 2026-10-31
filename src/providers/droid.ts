@@ -37,9 +37,6 @@ import {
   createDroidApiKeySource,
   createDroidKeychainSource,
   createDroidKeyfileSource,
-  DROID_API_KEY_SOURCE,
-  DROID_KEYCHAIN_SOURCE,
-  DROID_KEYFILE_SOURCE,
   type DroidCredentialSource,
   type DroidLocalResolution,
 } from "./droid-credential.js";
@@ -62,10 +59,10 @@ export const DROID_LIMITS_PATH = "/api/billing/limits";
  * alternative and is consulted only when the CLI's store is absent or its token
  * is rejected.
  */
-export const DROID_SOURCE_ORDER = [
-  DROID_KEYCHAIN_SOURCE,
-  DROID_KEYFILE_SOURCE,
-  DROID_API_KEY_SOURCE,
+const DROID_SOURCE_ORDER = [
+  createDroidKeychainSource,
+  createDroidKeyfileSource,
+  createDroidApiKeySource,
 ] as const;
 
 /**
@@ -132,7 +129,6 @@ const RESPONSE_KEYS = new Set([
   "monthly",
   "usedPercent",
   "windowEnd",
-  "secondsRemaining",
 ]);
 
 export type NormalizedDroidPayload = {
@@ -163,11 +159,7 @@ export function createDroidAdapter(
   overrides: Partial<DroidDependencies> = {},
 ): ProviderAdapter {
   const dependencies: DroidDependencies = {
-    sources: [
-      createDroidKeychainSource(),
-      createDroidKeyfileSource(),
-      createDroidApiKeySource(),
-    ],
+    sources: DROID_SOURCE_ORDER.map((create) => create()),
     fetch: providerFetch,
     readCachedProvider: readCachedProviderFromDisk,
     deleteCachedProvider: () => deleteCachedProviderFromDisk("droid"),
@@ -248,7 +240,7 @@ async function acquireDroidQuota(
       candidates.push({
         source: source.name,
         localState: resolution.expired ? "expired" : "valid",
-        refreshable: resolution.refreshable,
+        refreshable: resolution.expired && resolution.refreshable,
         credential: {
           credential: resolution.credential,
           contextId: contextIdFor(resolution),
@@ -322,20 +314,6 @@ async function acquireDroidQuota(
     return failureReport(failure, contextId, attempts, dependencies);
   }
 
-  if (selection.outcome === "live_no_quota") {
-    // Reserved: a reachable account whose limits cannot be read is surfaced by
-    // the attempt as a non-transient failure below, so this stays unreachable.
-    return failureReport(
-      new DroidFailure("droid_limits_unavailable", {
-        status: "unavailable",
-        authUsable: true,
-      }),
-      undefined,
-      attempts,
-      dependencies,
-    );
-  }
-
   if (skippedCredentialError) {
     // A present credential that may not be read without a granted prompt says
     // nothing about sign-in state; report the blocked read, never a sign-out.
@@ -346,6 +324,17 @@ async function acquireDroidQuota(
           ? { reason: "keychain_access_required" as const }
           : {}),
       }),
+      undefined,
+      attempts,
+      dependencies,
+    );
+  }
+
+  if (localError) {
+    // A present store that could not be read or parsed is not sign-out: the
+    // user may still be signed in, and the file error is the report.
+    return failureReport(
+      new DroidFailure(localError),
       undefined,
       attempts,
       dependencies,
@@ -366,7 +355,7 @@ async function acquireDroidQuota(
         });
     if (!refreshable) retireRejectedCache(contexts, dependencies);
     const rejected = selection.results.find(
-      (result) => result.outcome === "rejected",
+      (result) => result.outcome === "rejected" && result.refreshable,
     );
     return failureReport(
       failure,
@@ -377,16 +366,6 @@ async function acquireDroidQuota(
     );
   }
 
-  if (localError) {
-    // A present store that could not be read or parsed is not sign-out: the
-    // user may still be signed in, and the file error is the report.
-    return failureReport(
-      new DroidFailure(localError),
-      undefined,
-      attempts,
-      dependencies,
-    );
-  }
   return failureReport(
     new DroidFailure("droid_credential_unavailable", {
       status: "auth_required",
@@ -738,7 +717,8 @@ function rejectHttpFailure(response: Response, receivedAt: number): never {
  *   (the Droid CLI itself treats a response without it as unreadable); `core`
  *   is optional, and a missing one is absent, never zero.
  * - A meter with no usable `usedPercent` is named in `untrustedWindowIds`
- *   instead of guessed at.
+ *   instead of guessed at. A response with no usable meter at all is unreadable,
+ *   never an empty reading.
  * - `windowEnd` is the reset. A meter with a null `windowEnd` has no window in
  *   flight (a rolling window starts at first use) and reports its used
  *   percentage with no reset. A `windowEnd` that has already passed is a window
@@ -797,6 +777,8 @@ export function normalizeDroidPayload(
       );
     }
   }
+  if (result.windows.length === 0)
+    throw new DroidFailure("schema_invalid", { staleEligible: true });
   return result;
 }
 
@@ -812,12 +794,6 @@ function resetFor(meter: Record<string, unknown>, now: number): ResetReading {
     return end > now
       ? { status: "live", resetsAt: new Date(end).toISOString() }
       : { status: "rolled_over" };
-  const seconds = finiteNonNegative(meter.secondsRemaining);
-  if (seconds !== undefined && seconds > 0)
-    return {
-      status: "live",
-      resetsAt: new Date(now + seconds * 1000).toISOString(),
-    };
   return { status: "none" };
 }
 

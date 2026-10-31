@@ -28,9 +28,9 @@ import type { ProviderOptions } from "../types.js";
  * logged, or cached. The access token is sent to Factory's own usage endpoint
  * and nowhere else.
  */
-export const DROID_KEYCHAIN_SOURCE = "cli-keychain";
-export const DROID_KEYFILE_SOURCE = "cli-keyfile";
-export const DROID_API_KEY_SOURCE = "env:FACTORY_API_KEY";
+const DROID_KEYCHAIN_SOURCE = "cli-keychain";
+const DROID_KEYFILE_SOURCE = "cli-keyfile";
+const DROID_API_KEY_SOURCE = "env:FACTORY_API_KEY";
 export const DROID_KEYCHAIN_SERVICE = "Factory CLI";
 export const DROID_KEYCHAIN_ACCOUNT = "auth-encryption-key-security-cli";
 

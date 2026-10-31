@@ -12,6 +12,7 @@ import { commandCodeReadingContextId } from "./providers/commandcode-cache-conte
 import { devinReadingContextId } from "./providers/devin-cache-context.js";
 import { elevenLabsReadingContextId } from "./providers/elevenlabs-cache-context.js";
 import { miniMaxReadingContextId } from "./providers/minimax-cache-context.js";
+import { droidReadingContextId } from "./providers/droid-cache-context.js";
 import { museReadingContextId } from "./providers/muse-cache-context.js";
 import { zaiReadingContextId } from "./providers/zai-cache-context.js";
 import { copilotGithubHost } from "./providers/copilot-host.js";
@@ -115,6 +116,7 @@ const CONTEXT_SCOPED_PROVIDERS: Partial<
   codex: codexStampContextId,
   minimax: miniMaxReadingContextId,
   muse: museReadingContextId,
+  droid: droidReadingContextId,
   copilot: copilotReadingContextId,
   zai: zaiReadingContextId,
 };
@@ -610,6 +612,17 @@ export function readCachedMuseProvider(
   return readCachedProviderInContext("muse", contextId);
 }
 
+/**
+ * Factory Droid quota may only be reused when the cache record proves it was
+ * captured with the same account (or API key), so one account's pools can never
+ * stand in for another's.
+ */
+export function readCachedDroidProvider(
+  contextId: string,
+): ProviderQuota | undefined {
+  return readCachedProviderInContext("droid", contextId);
+}
+
 export function readCachedCopilotProvider(
   contextId: string,
 ): ProviderQuota | undefined {
@@ -774,11 +787,13 @@ function isCacheExcluded(provider: ProviderQuota): boolean {
 }
 
 function excludeFromFreshReuse(provider: ProviderId): boolean {
-  // Muse Keychain and Higgsfield CLI logins are not traced files, and the
-  // Higgsfield status payload we already fetch has no stable non-email
-  // account discriminator, so --max-age must never serve another seat's
-  // credits or jobs as fresh.
-  return provider === "muse" || provider === "higgsfield";
+  // Muse Keychain, Droid Keychain, and Higgsfield CLI logins are not traced
+  // files, and the Higgsfield status payload we already fetch has no stable
+  // non-email account discriminator, so --max-age must never serve another
+  // seat's credits or jobs as fresh.
+  return (
+    provider === "muse" || provider === "higgsfield" || provider === "droid"
+  );
 }
 
 function cacheIdentity(provider: ProviderQuota): string {

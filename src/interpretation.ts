@@ -196,7 +196,72 @@ function semanticsFor(
       );
     case "higgsfield":
       return higgsfieldSemantics(provider.windows, generatedAt);
+    case "droid":
+      return droidSemantics(
+        provider.windows,
+        provider.state.untrustedWindowIds ?? [],
+        generatedAt,
+      );
   }
+}
+
+/**
+ * Factory Droid meters two independent token pools: Droid Core (open-weight
+ * models) and the pool every other model draws from. Each pool has its own
+ * rolling five-hour, weekly, and monthly windows, and within a pool they
+ * jointly bound that pool. The pools are never combined: one can be spent while
+ * the other is nearly untouched, so each is its own scope. A pool with an
+ * unparsed window is unresolved for its own scope only.
+ */
+const DROID_SCOPES = [
+  { scope: "droid_core", prefix: "droid_core_" },
+  { scope: "other_models", prefix: "other_models_" },
+] as const;
+const DROID_PERIODS = ["5h", "weekly", "monthly"];
+
+function droidSemantics(
+  windows: QuotaWindow[],
+  untrustedWindowIds: string[],
+  generatedAt: string,
+): QuotaSemantics {
+  const known = (id: string): boolean =>
+    DROID_SCOPES.some(({ prefix }) =>
+      DROID_PERIODS.some((period) => id === `${prefix}${period}`),
+    );
+  const effectiveAvailability: EffectiveAvailability[] = [];
+  for (const { scope, prefix } of DROID_SCOPES) {
+    const bounds = windows.filter(
+      ({ id }) => known(id) && id.startsWith(prefix),
+    );
+    const unparsed = untrustedWindowIds.filter(
+      (id) => known(id) && id.startsWith(prefix),
+    );
+    if (bounds.length === 0) continue;
+    effectiveAvailability.push(
+      unparsed.length > 0
+        ? unresolvedAvailability(scope, bounds, unparsed)
+        : availability(scope, bounds, generatedAt),
+    );
+  }
+  const unresolvedWindowIds = [
+    ...new Set([
+      ...windows.filter(({ id }) => !known(id)).map(({ id }) => id),
+      ...untrustedWindowIds,
+    ]),
+  ];
+  if (unresolvedWindowIds.length > 0) {
+    return {
+      status: effectiveAvailability.length > 0 ? "partial" : "unknown",
+      description:
+        "Factory Droid meters Droid Core and every other model as separate pools, each bounded by its own five-hour, weekly, and monthly windows. A missing, unrecognized, or unparsed window leaves its pool's bound unknown, so that pool's effective remaining is not claimed.",
+      effectiveAvailability,
+      unresolvedWindowIds,
+    };
+  }
+  return knownSemantics(
+    effectiveAvailability,
+    "Factory Droid meters Droid Core and every other model as separate pools. Within a pool the five-hour, weekly, and monthly windows jointly bound it, so that pool's effective remaining is the minimum across its windows; the pools are never combined.",
+  );
 }
 
 /**

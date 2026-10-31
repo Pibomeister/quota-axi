@@ -13,6 +13,7 @@ import { kimiAdapter } from "./kimi.js";
 import { opencodeGoAdapter } from "./opencode-go.js";
 import { minimaxAdapter } from "./minimax.js";
 import { mimoAdapter } from "./mimo.js";
+import { droidAdapter } from "./droid.js";
 import { museAdapter } from "./muse.js";
 import { deepseekAdapter } from "./deepseek.js";
 import { openrouterAdapter } from "./openrouter.js";
@@ -43,6 +44,7 @@ export const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   devin: devinAdapter,
   muse: museAdapter,
   higgsfield: higgsfieldAdapter,
+  droid: droidAdapter,
 };
 
 export function parseProviders(value: string | undefined): ProviderId[] {

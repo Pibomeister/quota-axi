@@ -1,3 +1,4 @@
+import { createCipheriv, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,6 +126,8 @@ const ENV_KEYS = [
   "WINDSURF_API_SERVER_URL",
   "QUOTA_AXI_OPENCODE_GO_PI_AUTH",
   "COPILOT_HOME",
+  "FACTORY_API_KEY",
+  "FACTORY_HOME_OVERRIDE",
 ] as const;
 
 const originalEnv = Object.fromEntries(
@@ -155,6 +158,8 @@ beforeEach(() => {
   // exercises that real file-to-adapter path.
   process.env.QUOTA_AXI_OPENCODE_GO_PI_AUTH = "1";
   process.env.COPILOT_HOME = join(tempDir, "copilot");
+  process.env.FACTORY_HOME_OVERRIDE = join(tempDir, "factory-home");
+  delete process.env.FACTORY_API_KEY;
   delete process.env.GROK_AUTH;
   delete process.env.GROK_AUTH_JSON;
   delete process.env.GROK_AUTH_PATH;
@@ -1010,6 +1015,161 @@ describe("credential source contract", { timeout: 30_000 }, () => {
       expect(api.requests[0]).toContain("Bearer muse-contract-access");
       expect(api.requests.join("")).not.toContain("must-not-be-read");
       expect(result.state.authStatus).toBe("expired_refreshable");
+    });
+  });
+
+  /**
+   * Droid has three sources in ownership order: the CLI's Keychain-keyed store,
+   * its key-file store, and an exported `FACTORY_API_KEY`. An absent store is
+   * not a degraded one, a present but unusable one is a credential that exists,
+   * and nothing unusable - nor the bundle's refresh token - is ever sent.
+   */
+  describe("droid", () => {
+    const keyfile = "cli-keyfile";
+    const env = "env:FACTORY_API_KEY";
+    const key = randomBytes(32);
+
+    /**
+     * Pin the platform off macOS so the Keychain source resolves absent and a
+     * developer machine's real Droid login cannot answer these reads.
+     */
+    async function asLinux<T>(read: () => Promise<T>): Promise<T> {
+      const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+      Object.defineProperty(process, "platform", { value: "linux" });
+      try {
+        return await read();
+      } finally {
+        if (descriptor) Object.defineProperty(process, "platform", descriptor);
+      }
+    }
+
+    function writeDroidStore(contents: string, keyText?: string): void {
+      const dir = join(process.env.FACTORY_HOME_OVERRIDE!, ".factory");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "auth.v2.file"), contents, { mode: 0o600 });
+      writeFileSync(
+        join(dir, "auth.v2.key"),
+        keyText ?? key.toString("base64"),
+        { mode: 0o600 },
+      );
+    }
+
+    function encryptedBundle(bundle: unknown): string {
+      const iv = randomBytes(16);
+      const cipher = createCipheriv("aes-256-gcm", key, iv);
+      const body = Buffer.concat([
+        cipher.update(JSON.stringify(bundle), "utf8"),
+        cipher.final(),
+      ]);
+      return [iv, cipher.getAuthTag(), body]
+        .map((part) => part.toString("base64"))
+        .join(":");
+    }
+
+    function tokenWith(exp: number): string {
+      const claims = Buffer.from(
+        JSON.stringify({ sub: "user-contract", exp }),
+      ).toString("base64url");
+      return `header.${claims}.signature`;
+    }
+
+    const pastExp = Math.floor(Date.now() / 1000) - 3600;
+    const futureExp = Math.floor(Date.now() / 1000) + 3600;
+
+    it("declares its sources in ownership order", async () => {
+      const report = await asLinux(() => readAuth("droid"));
+
+      expect(report.sources.map(({ source }) => source)).toEqual([
+        "cli-keychain",
+        keyfile,
+        env,
+      ]);
+    });
+
+    it("leaves absent sources unmarked, and sends nothing", async () => {
+      const api = stubRejectingApi();
+
+      const result = await asLinux(() => readQuota("droid"));
+
+      for (const source of [keyfile, env]) {
+        const attempts = attemptsFor(result, source);
+        expect(attempts.length).toBeGreaterThan(0);
+        for (const attempt of attempts)
+          expect(attempt.credentialPresent).toBeUndefined();
+      }
+      expect(api.bearers).toEqual([]);
+      expect(result.state.status).toBe("auth_required");
+    });
+
+    it("never sends a blank FACTORY_API_KEY", async () => {
+      process.env.FACTORY_API_KEY = "   ";
+      const api = stubRejectingApi();
+
+      const result = await asLinux(() => readQuota("droid"));
+
+      expect(api.bearers).toEqual([]);
+      expect(result.state.status).toBe("auth_required");
+    });
+
+    it.each([
+      ["an environment reference", "$FACTORY_API_KEY"],
+      ["a command reference", "!op read op://vault/key"],
+      ["a control byte", "factory-\u0007-fixture"],
+    ])(
+      "never sends %s from FACTORY_API_KEY, and does not call that a sign-out",
+      async (_label, value) => {
+        process.env.FACTORY_API_KEY = value;
+        const api = stubRejectingApi();
+
+        const result = await asLinux(() => readQuota("droid"));
+
+        expect(api.bearers).toEqual([]);
+        expect(result.state.status).toBe("error");
+        expect(result.state.error).toBe("factory_api_key_invalid");
+        expect(result.state.authStatus).toBeUndefined();
+      },
+    );
+
+    it("marks an undecryptable store as a credential that exists, then hands over", async () => {
+      writeDroidStore("not:an:encrypted-bundle");
+      process.env.FACTORY_API_KEY = "factory-contract-fixture";
+      const api = stubRejectingApi();
+
+      const result = await asLinux(() => readQuota("droid"));
+
+      for (const attempt of attemptsFor(result, keyfile))
+        expect(attempt.credentialPresent).toBe(true);
+      expect(api.bearers).toEqual(["Bearer factory-contract-fixture"]);
+      expect(result.state.status).toBe("error");
+      expect(result.state.error).toBe("droid_auth_undecryptable");
+    });
+
+    it("sends only the stored access token, and reads a rejected expired one as soft expiry", async () => {
+      const token = tokenWith(pastExp);
+      writeDroidStore(
+        encryptedBundle({ access_token: token, refresh_token: "never-sent" }),
+      );
+      const api = stubRejectingApi();
+
+      const result = await asLinux(() => readQuota("droid"));
+
+      expect(api.bearers).toEqual([`Bearer ${token}`]);
+      expect(result.state.authStatus).toBe("expired_refreshable");
+    });
+
+    it("reads a rejected unexpired token as revoked despite its refresh token", async () => {
+      const token = tokenWith(futureExp);
+      writeDroidStore(
+        encryptedBundle({ access_token: token, refresh_token: "never-sent" }),
+      );
+      stubRejectingApi();
+
+      const result = await asLinux(() => readQuota("droid"));
+
+      expect(result.state).toMatchObject({
+        status: "auth_required",
+        authStatus: "unusable",
+      });
     });
   });
 });

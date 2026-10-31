@@ -41,6 +41,7 @@ const originalElevenLabsProvider = PROVIDERS.elevenlabs;
 const originalDevinProvider = PROVIDERS.devin;
 const originalMuseProvider = PROVIDERS.muse;
 const originalHiggsfieldProvider = PROVIDERS.higgsfield;
+const originalDroidProvider = PROVIDERS.droid;
 const originalXdgCacheHome = process.env.XDG_CACHE_HOME;
 const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 const originalCodexHome = process.env.CODEX_HOME;
@@ -75,6 +76,7 @@ afterEach(() => {
   PROVIDERS.devin = originalDevinProvider;
   PROVIDERS.muse = originalMuseProvider;
   PROVIDERS.higgsfield = originalHiggsfieldProvider;
+  PROVIDERS.droid = originalDroidProvider;
   vi.unstubAllGlobals();
   if (originalXdgCacheHome === undefined) delete process.env.XDG_CACHE_HOME;
   else process.env.XDG_CACHE_HOME = originalXdgCacheHome;
@@ -117,6 +119,7 @@ describe("CLI flag parsing", () => {
       "devin",
       "muse",
       "higgsfield",
+      "droid",
     ]);
   });
 
@@ -193,6 +196,7 @@ describe("CLI flag parsing", () => {
           "devin",
           "muse",
           "higgsfield",
+          "droid",
         ],
         json: true,
         full: true,
@@ -1496,12 +1500,12 @@ describe("human report folding for providers that are not set up", () => {
     expect(output.trimEnd().split("\n").slice(-3)).toEqual([
       "  ○ not set up  cursor · copilot · grok · kimi · zai · agy · alibaba · opencode-go · commandcode",
       "                minimax · mimo · deepseek · openrouter · elevenlabs · devin · muse · higgsfield",
-      "                quota-axi auth shows where each is read",
+      "                droid   quota-axi auth shows where each is read",
     ]);
     expect(output).not.toMatch(/╭─ ○ (agy|alibaba|commandcode) /);
 
     expect(output).toMatch(
-      /· 1 live · 0 stale · 1 needs attention · 17 not set up\n/,
+      /· 1 live · 0 stale · 1 needs attention · 18 not set up\n/,
     );
     expect(output).toContain("╭─ ● codex ");
     expect(output).toContain("╭─ ○ claude ");
@@ -1514,7 +1518,7 @@ describe("human report folding for providers that are not set up", () => {
     stubFoldFleet();
     const output = await capture(["--tui", "--once", "--all"]);
 
-    expect(output).toContain("  ○ not set up · 17\n");
+    expect(output).toContain("  ○ not set up · 18\n");
     expect(output).toContain("╭─ ○ copilot ");
     expect(output).toContain("╭─ ○ elevenlabs ");
     expect(output).toContain("╭─ ○ higgsfield ");
@@ -1580,7 +1584,7 @@ describe("human report folding for providers that are not set up", () => {
 
       process.stdin.emit("data", Buffer.from("a"));
       await settle("a hide not set up");
-      expect(lastFrame()).toContain("  ○ not set up · 17");
+      expect(lastFrame()).toContain("  ○ not set up · 18");
       expect(lastFrame()).toContain("╭─ ○ zai ");
 
       process.stdin.emit("data", Buffer.from("q"));
@@ -2205,6 +2209,9 @@ describe("default TOON decision blocks", () => {
     PROVIDERS.devin = providerWithQuota(freshDevinQuota());
     PROVIDERS.muse = providerWithQuota(emptyFreshQuota("muse", "Muse"));
     PROVIDERS.higgsfield = providerWithQuota(freshHiggsfieldQuota());
+    PROVIDERS.droid = providerWithQuota(
+      emptyFreshQuota("droid", "Factory Droid"),
+    );
 
     const output = await capture([]);
     const named = new Set([
@@ -2222,6 +2229,7 @@ describe("default TOON decision blocks", () => {
       "cursor",
       "deepseek",
       "devin",
+      "droid",
       "elevenlabs",
       "grok",
       "higgsfield",
@@ -3039,6 +3047,7 @@ describe("CLI plumbing via the axi SDK", () => {
     // Keychain on macOS, so every provider must be stubbed here.
     PROVIDERS.muse = providerWithAuth("muse", "Muse");
     PROVIDERS.higgsfield = providerWithAuth("higgsfield", "Higgsfield");
+    PROVIDERS.droid = providerWithAuth("droid", "Factory Droid");
 
     const output = await capture(["--allow-keychain-prompt", "auth"]);
     expect(output).toContain(

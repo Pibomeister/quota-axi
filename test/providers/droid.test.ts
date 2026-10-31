@@ -484,6 +484,38 @@ describe("Factory Droid adapter", () => {
     expect(report.windows).toEqual([]);
   });
 
+  it.each([
+    ["answers", 200, "fresh"],
+    ["fails transiently", 503, "error"],
+  ])(
+    "keeps declared order: an expired token that %s stops before the API key",
+    async (_label, status, reported) => {
+      const seen: string[] = [];
+      const fetch = vi.fn((_url: string, init: RequestInit) => {
+        seen.push((init.headers as Record<string, string>).Authorization!);
+        return Promise.resolve(
+          status === 200
+            ? jsonResponse(limitsBody())
+            : new Response("{}", { status }),
+        );
+      });
+      const report = await adapterWith(
+        [
+          resolvedSource("cli-keychain", {
+            credential: "expired-token",
+            expired: true,
+            refreshable: true,
+          }),
+          createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+        ],
+        fetch as unknown as typeof globalThis.fetch,
+      ).fetchQuota(OPTIONS);
+
+      expect(seen).toEqual(["Bearer expired-token"]);
+      expect(report.state.status).toBe(reported);
+    },
+  );
+
   it("uses a live sibling when the stored token is expired", async () => {
     const seen: string[] = [];
     const fetch = vi.fn((_url: string, init: RequestInit) => {
@@ -507,7 +539,7 @@ describe("Factory Droid adapter", () => {
       fetch as unknown as typeof globalThis.fetch,
     ).fetchQuota(OPTIONS);
 
-    expect(seen).toEqual([`Bearer ${API_KEY}`]);
+    expect(seen).toEqual(["Bearer expired-token", `Bearer ${API_KEY}`]);
     expect(report.state).toMatchObject({
       status: "fresh",
       authStatus: "usable",

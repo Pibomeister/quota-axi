@@ -239,7 +239,7 @@ async function acquireDroidQuota(
     if (resolution.status === "resolved") {
       candidates.push({
         source: source.name,
-        localState: resolution.expired ? "expired" : "valid",
+        localState: "valid",
         refreshable: resolution.expired && resolution.refreshable,
         credential: {
           credential: resolution.credential,

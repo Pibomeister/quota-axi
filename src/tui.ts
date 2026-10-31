@@ -1052,11 +1052,26 @@ function compactHeadlineWindowName(label: string, width: number): string {
 }
 
 /**
+ * Droid's two pools share the same three periods, so the generic compression
+ * below would lose the pool or the period. These rows name both.
+ */
+const DROID_ROW_LABELS: Readonly<Record<string, string>> = {
+  droid_core_5h: "core 5h",
+  droid_core_weekly: "core wk",
+  droid_core_monthly: "core mo",
+  other_models_5h: "othr 5h",
+  other_models_weekly: "othr wk",
+  other_models_monthly: "othr mo",
+};
+
+/**
  * Compress a window label into the 7-char row column: drop a trailing
  * period/unit token ("Fable week" -> "fable", "730h window" -> "730h"),
  * then fall back to the last hyphen segment and an ellipsis.
  */
 export function shortWindowLabel(window: QuotaWindow): string {
+  const droidLabel = DROID_ROW_LABELS[window.id];
+  if (droidLabel !== undefined) return droidLabel;
   const tokens = window.label.split(/[\s_]+/).filter(Boolean);
   if (
     tokens.length > 1 &&

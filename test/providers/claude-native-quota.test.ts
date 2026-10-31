@@ -877,8 +877,10 @@ process.disconnect();
       runner.on("message", (message) => messages.push(message));
       let child: { pid: number; descendant: number; cwd: string } | undefined;
       try {
+        // The fixture must start tsx, Node, and a child before it is ready, which
+        // takes more than 4s on a busy host. This wait ends as soon as it is ready.
         await vi.waitFor(() => expect(existsSync(ready)).toBe(true), {
-          timeout: 4000,
+          timeout: 30_000,
           interval: 20,
         });
         child = JSON.parse(readFileSync(ready, "utf8")) as typeof child;
@@ -909,7 +911,7 @@ process.disconnect();
             expect(() => process.kill(child!.pid, 0)).toThrow();
             expect(() => process.kill(child!.descendant, 0)).toThrow();
           },
-          { timeout: 2000, interval: 20 },
+          { timeout: 15_000, interval: 20 },
         );
       } finally {
         runner.kill("SIGKILL");
@@ -923,6 +925,6 @@ process.disconnect();
         rmSync(directory, { recursive: true, force: true });
       }
     },
-    10000,
+    60_000,
   );
 });

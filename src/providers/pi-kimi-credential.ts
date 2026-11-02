@@ -31,7 +31,8 @@ export type KimiCredentialResolution =
 
 export type KimiCredentialInspection =
   | Exclude<KimiCredentialResolution["status"], "available">
-  | "available";
+  | "available"
+  | "expired_refreshable";
 
 export type KimiCredentialBroker = {
   resolve(): Promise<KimiCredentialResolution>;
@@ -56,8 +57,12 @@ export function createPiKimiCredentialBroker(
     ...overrides,
   };
 
-  const inspect = async (): Promise<KimiCredentialInspection> =>
-    (await resolveCredential(dependencies)).status;
+  const inspect = async (): Promise<KimiCredentialInspection> => {
+    const resolution = await resolveCredential(dependencies);
+    return resolution.status === "expired" && resolution.refreshable
+      ? "expired_refreshable"
+      : resolution.status;
+  };
 
   return {
     resolve: () => resolveCredential(dependencies),

@@ -142,7 +142,9 @@ describe("Kimi Code CLI credential discovery", () => {
               refreshable: fixture.refreshable,
             }),
       });
-      await expect(source.inspect()).resolves.toBe(fixture.status);
+      await expect(source.inspect()).resolves.toBe(
+        fixture.refreshable ? "expired_refreshable" : fixture.status,
+      );
     }
   });
 

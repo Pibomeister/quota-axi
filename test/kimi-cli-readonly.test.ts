@@ -366,7 +366,7 @@ globalThis.fetch = async (input, init) => {
       remedyCommand: "pi",
     });
     expect(report.help).toContain(
-      "Kimi's access token expired; this is not a sign-out. Pi can renew it the next time a Kimi model is used in `pi`. quota-axi cannot confirm fresh quota until then. For a fresh reading now, use a Kimi model in `pi` once. quota-axi stays read-only and never rotates Kimi credentials.",
+      "Pi's Kimi access token expired and a refresh token is stored; quota-axi has no evidence of a sign-out. If that refresh token is still valid, Pi can renew the access token the next time a Kimi model is used in `pi`. quota-axi cannot confirm fresh quota until then. To attempt a fresh reading now, use a Kimi model in `pi` once. quota-axi stays read-only and never rotates Kimi credentials.",
     );
 
     const toon = runCli(
@@ -399,6 +399,8 @@ globalThis.fetch = async (input, init) => {
     );
     expect(auth.status).toBe(0);
     expect(auth.stdout).not.toContain("synthetic-pi-refresh-must-not-leak");
+    expect(auth.stdout).toContain("pi_kimi_access_token_expired");
+    expect(auth.stdout).not.toContain("pi_kimi_credential_expired");
     expect(spawnLog(fixture)).toBe("");
     expect(readFileSync(authPath, "utf8")).toBe(before);
   });
@@ -412,6 +414,17 @@ globalThis.fetch = async (input, init) => {
     });
     const vendorBin = vendorStubs(fixture);
 
+    const auth = runCli(
+      fixture,
+      ["auth", "--provider", "kimi", "--json"],
+      undefined,
+      { PATH: vendorBin },
+    );
+    expect(auth.status).toBe(0);
+    expect(auth.stdout).toContain("kimi_code_cli_access_token_expired");
+    expect(auth.stdout).not.toContain("kimi_code_cli_credential_expired");
+    expect(auth.stdout).not.toContain("synthetic-cli-refresh-must-not-leak");
+
     const result = runCli(
       fixture,
       ["--provider", "kimi", "--json", "--full"],
@@ -424,7 +437,7 @@ globalThis.fetch = async (input, init) => {
     expect(result.stdout).not.toContain("synthetic-cli-refresh-must-not-leak");
     expect(JSON.parse(result.stdout)).toMatchObject({
       help: [
-        "Kimi's access token expired; this is not a sign-out. Kimi Code can renew it on its next request. quota-axi cannot confirm fresh quota until then. For a fresh reading now, run a Kimi Code session with `kimi` once. quota-axi stays read-only and never rotates Kimi credentials.",
+        "Kimi access token expired and a refresh token is stored; quota-axi has no evidence of a sign-out. If that refresh token is still valid, Kimi Code can renew the access token on its next request. quota-axi cannot confirm fresh quota until then. To attempt a fresh reading now, run a Kimi Code session with `kimi` once. quota-axi stays read-only and never rotates Kimi credentials.",
       ],
       providers: [
         {
@@ -477,7 +490,7 @@ globalThis.fetch = async (input, init) => {
       expect(stale.stdout).not.toContain("credentials_expired");
       expect(stale.stdout).not.toContain("kimi_code_cli_credential_expired");
       expect(stale.stdout).not.toContain("auth_required");
-      expect(stale.stdout).toContain("this is not a sign-out");
+      expect(stale.stdout).toContain("quota-axi has no evidence of a sign-out");
       expect(stale.stdout).not.toContain("synthetic-cli-access");
       expect(stale.stdout).not.toContain("synthetic-cli-refresh-must-not-leak");
       if (json) {

@@ -2065,11 +2065,24 @@ describe("Kimi credential outcomes and cache policy", () => {
     }
   });
 
+  it("reports a refreshable Pi access-token expiry apart from credential expiry", async () => {
+    const report = await testAdapter({
+      broker: broker({ status: "missing" }, "expired_refreshable"),
+    }).inspectAuth(OPTIONS);
+
+    expect(report.sources[0]).toEqual({
+      source: "pi:kimi-coding",
+      status: "expired",
+      error: "pi_kimi_access_token_expired",
+    });
+  });
+
   it.each([
     ["available", "available", undefined],
     ["missing", "missing", undefined],
     ["invalid", "invalid", "kimi_code_cli_credential_invalid"],
     ["expired", "expired", "kimi_code_cli_credential_expired"],
+    ["expired_refreshable", "expired", "kimi_code_cli_access_token_expired"],
     ["error", "invalid", "credential_resolution_failed"],
   ] as const)(
     "reports CLI credential state %s without a path or value",

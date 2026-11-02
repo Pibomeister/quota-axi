@@ -472,9 +472,9 @@ function claudeSiblingRefreshHelpLine(provider: ProviderQuota): string {
 
 function kimiTokenRefreshHelpLine(remedy: string | undefined): string {
   if (remedy === KIMI_CODE_TOKEN_REFRESH_REMEDY_COMMAND) {
-    return "Kimi's access token expired; this is not a sign-out. Kimi Code can renew it on its next request. quota-axi cannot confirm fresh quota until then. For a fresh reading now, run a Kimi Code session with `kimi` once. quota-axi stays read-only and never rotates Kimi credentials.";
+    return "Kimi access token expired and a refresh token is stored; quota-axi has no evidence of a sign-out. If that refresh token is still valid, Kimi Code can renew the access token on its next request. quota-axi cannot confirm fresh quota until then. To attempt a fresh reading now, run a Kimi Code session with `kimi` once. quota-axi stays read-only and never rotates Kimi credentials.";
   }
-  return "Kimi's access token expired; this is not a sign-out. Pi can renew it the next time a Kimi model is used in `pi`. quota-axi cannot confirm fresh quota until then. For a fresh reading now, use a Kimi model in `pi` once. quota-axi stays read-only and never rotates Kimi credentials.";
+  return "Pi's Kimi access token expired and a refresh token is stored; quota-axi has no evidence of a sign-out. If that refresh token is still valid, Pi can renew the access token the next time a Kimi model is used in `pi`. quota-axi cannot confirm fresh quota until then. To attempt a fresh reading now, use a Kimi model in `pi` once. quota-axi stays read-only and never rotates Kimi credentials.";
 }
 
 function grokTokenRefreshHelpLine(): string {

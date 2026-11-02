@@ -19,12 +19,13 @@ export const KEYCHAIN_ACCESS_REASON = "keychain_access_required";
 export const KEYCHAIN_ACCESS_REMEDY_COMMAND =
   "quota-axi --allow-keychain-prompt";
 export const CREDENTIALS_EXPIRED_REASON = "credentials_expired";
+export const ACCESS_TOKEN_EXPIRED_REASON = "access_token_expired";
 export const GROK_TOKEN_REFRESH_REMEDY_COMMAND = "grok";
 export const CLAUDE_TOKEN_REFRESH_REMEDY_COMMAND = "claude";
 export const PI_KIMI_TOKEN_REFRESH_REMEDY_COMMAND = "pi";
 export const KIMI_CODE_TOKEN_REFRESH_REMEDY_COMMAND = "kimi";
-const PI_KIMI_EXPIRED_ERROR = "pi_kimi_credential_expired";
-const KIMI_CODE_EXPIRED_ERROR = "kimi_code_cli_credential_expired";
+const PI_KIMI_EXPIRED_ERROR = "pi_kimi_access_token_expired";
+const KIMI_CODE_EXPIRED_ERROR = "kimi_code_cli_access_token_expired";
 export const INFERENCE_OPT_IN_REASON = "inference_opt_in_required";
 export const CLAUDE_INFERENCE_REMEDY_COMMAND =
   "quota-axi --provider claude --allow-claude-inference";
@@ -143,7 +144,7 @@ function annotateProviderAdvice(provider: ProviderQuota): ProviderQuota {
       ...provider,
       state: {
         ...provider.state,
-        reason: CREDENTIALS_EXPIRED_REASON,
+        reason: ACCESS_TOKEN_EXPIRED_REASON,
         remedyCommand: kimiRemedy,
       },
     };
@@ -428,7 +429,7 @@ function hasKeychainAccessAdvice(provider: ProviderQuota): boolean {
 function hasKimiTokenRefreshAdvice(provider: ProviderQuota): boolean {
   return (
     provider.provider === "kimi" &&
-    provider.state.reason === CREDENTIALS_EXPIRED_REASON &&
+    provider.state.reason === ACCESS_TOKEN_EXPIRED_REASON &&
     (provider.state.remedyCommand === PI_KIMI_TOKEN_REFRESH_REMEDY_COMMAND ||
       provider.state.remedyCommand === KIMI_CODE_TOKEN_REFRESH_REMEDY_COMMAND)
   );
@@ -471,9 +472,9 @@ function claudeSiblingRefreshHelpLine(provider: ProviderQuota): string {
 
 function kimiTokenRefreshHelpLine(remedy: string | undefined): string {
   if (remedy === KIMI_CODE_TOKEN_REFRESH_REMEDY_COMMAND) {
-    return "Tell your user: run a Kimi Code session with `kimi` once so Kimi Code refreshes its own session token. quota-axi stays read-only and never rotates Kimi credentials.";
+    return "Kimi access token expired and a refresh token is stored; quota-axi has no evidence of a sign-out. If that refresh token is still valid, Kimi Code can renew the access token on its next request. quota-axi cannot confirm fresh quota until then. To attempt a fresh reading now, run a Kimi Code session with `kimi` once. quota-axi stays read-only and never rotates Kimi credentials.";
   }
-  return "Tell your user: use a Kimi model in `pi` once so Pi refreshes its own Kimi session token; Pi refreshes a provider's token only when that provider is used. quota-axi stays read-only and never rotates Kimi credentials.";
+  return "Pi's Kimi access token expired and a refresh token is stored; quota-axi has no evidence of a sign-out. If that refresh token is still valid, Pi can renew the access token the next time a Kimi model is used in `pi`. quota-axi cannot confirm fresh quota until then. To attempt a fresh reading now, use a Kimi model in `pi` once. quota-axi stays read-only and never rotates Kimi credentials.";
 }
 
 function grokTokenRefreshHelpLine(): string {

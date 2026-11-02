@@ -394,7 +394,7 @@ describe("Pi Kimi credential broker", () => {
     });
     expect(JSON.stringify(resolution)).not.toContain("must-not-be-refreshed");
     await expect(createPiKimiCredentialBroker().inspect()).resolves.toBe(
-      "expired",
+      "expired_refreshable",
     );
     expectSnapshotEqual(fixture.authPath, fixture.before);
   });
@@ -410,6 +410,9 @@ describe("Pi Kimi credential broker", () => {
       refreshable: false,
       credential: "pi-oauth-terminal-access-119",
     });
+    await expect(createPiKimiCredentialBroker().inspect()).resolves.toBe(
+      "expired",
+    );
   });
 
   it.each([

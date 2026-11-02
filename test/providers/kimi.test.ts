@@ -2065,11 +2065,24 @@ describe("Kimi credential outcomes and cache policy", () => {
     }
   });
 
+  it("reports a refreshable Pi access-token expiry apart from credential expiry", async () => {
+    const report = await testAdapter({
+      broker: broker({ status: "missing" }, "expired_refreshable"),
+    }).inspectAuth(OPTIONS);
+
+    expect(report.sources[0]).toEqual({
+      source: "pi:kimi-coding",
+      status: "expired",
+      error: "pi_kimi_access_token_expired",
+    });
+  });
+
   it.each([
     ["available", "available", undefined],
     ["missing", "missing", undefined],
     ["invalid", "invalid", "kimi_code_cli_credential_invalid"],
     ["expired", "expired", "kimi_code_cli_credential_expired"],
+    ["expired_refreshable", "expired", "kimi_code_cli_access_token_expired"],
     ["error", "invalid", "credential_resolution_failed"],
   ] as const)(
     "reports CLI credential state %s without a path or value",
@@ -2201,7 +2214,7 @@ describe("Kimi credential outcomes and cache policy", () => {
       {
         source: "pi:kimi-coding",
         status: "skipped",
-        error: "pi_kimi_credential_expired",
+        error: "pi_kimi_access_token_expired",
         credentialPresent: true,
       },
       { source: "kimi-code-cli", status: "success" },
@@ -2217,7 +2230,7 @@ describe("Kimi credential outcomes and cache policy", () => {
       false,
     );
     expect(rendered).toContain(
-      'kimi,all,degraded_source,"pi:kimi-coding · pi_kimi_credential_expired",none',
+      'kimi,all,degraded_source,"pi:kimi-coding · pi_kimi_access_token_expired",none',
     );
   });
 
@@ -2283,7 +2296,7 @@ describe("Kimi credential outcomes and cache policy", () => {
     expect(report.state).toMatchObject({
       status: "unavailable",
       stale: false,
-      error: "kimi_code_cli_credential_expired",
+      error: "kimi_code_cli_access_token_expired",
       authStatus: "expired_refreshable",
       sourcesTried: ["pi:kimi-coding", "kimi-code-cli"],
     });
@@ -2296,7 +2309,7 @@ describe("Kimi credential outcomes and cache policy", () => {
       {
         source: "kimi-code-cli",
         status: "failed",
-        error: "kimi_code_cli_credential_expired",
+        error: "kimi_code_cli_access_token_expired",
       },
     ]);
     expect(JSON.stringify(report)).not.toContain("soft-expired-cli-token");
@@ -2324,7 +2337,7 @@ describe("Kimi credential outcomes and cache policy", () => {
       state: {
         status: "stale",
         stale: true,
-        error: "kimi_code_cli_credential_expired",
+        error: "kimi_code_cli_access_token_expired",
         authStatus: "expired_refreshable",
         sourcesTried: ["pi:kimi-coding", "kimi-code-cli", "cache"],
       },
@@ -2383,7 +2396,7 @@ describe("Kimi credential outcomes and cache policy", () => {
     expect(report.state).toMatchObject({
       status: "unavailable",
       stale: false,
-      error: "pi_kimi_credential_expired",
+      error: "pi_kimi_access_token_expired",
       authStatus: "expired_refreshable",
       sourcesTried: ["pi:kimi-coding", "kimi-code-cli"],
     });
@@ -2391,7 +2404,7 @@ describe("Kimi credential outcomes and cache policy", () => {
       {
         source: "pi:kimi-coding",
         status: "failed",
-        error: "pi_kimi_credential_expired",
+        error: "pi_kimi_access_token_expired",
       },
       {
         source: "kimi-code-cli",
@@ -2427,7 +2440,7 @@ describe("Kimi credential outcomes and cache policy", () => {
     expect(report.state).toMatchObject({
       status: "unavailable",
       stale: false,
-      error: "pi_kimi_credential_expired",
+      error: "pi_kimi_access_token_expired",
       authStatus: "expired_refreshable",
       sourcesTried: ["pi:kimi-coding", "kimi-code-cli"],
     });
@@ -2435,12 +2448,12 @@ describe("Kimi credential outcomes and cache policy", () => {
       {
         source: "pi:kimi-coding",
         status: "failed",
-        error: "pi_kimi_credential_expired",
+        error: "pi_kimi_access_token_expired",
       },
       {
         source: "kimi-code-cli",
         status: "failed",
-        error: "kimi_code_cli_credential_expired",
+        error: "kimi_code_cli_access_token_expired",
       },
     ]);
 
@@ -2485,7 +2498,7 @@ describe("Kimi credential outcomes and cache policy", () => {
       error: "provider_unavailable",
     });
     expect(report.state.authStatus).toBeUndefined();
-    expect(report.state.error).not.toBe("pi_kimi_credential_expired");
+    expect(report.state.error).not.toBe("pi_kimi_access_token_expired");
   });
 
   it("preserves stale cache after a CLI credential read failure", async () => {

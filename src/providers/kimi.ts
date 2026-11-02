@@ -170,13 +170,15 @@ export function createKimiAdapter(
       const piError =
         piInspection === "unsupported"
           ? "unsupported_credential_type"
-          : piInspection === "expired"
-            ? "pi_kimi_credential_expired"
-            : piInspection === "invalid"
-              ? "pi_kimi_credential_invalid"
-              : piInspection === "error"
-                ? "credential_resolution_failed"
-                : undefined;
+          : piInspection === "expired_refreshable"
+            ? "pi_kimi_access_token_expired"
+            : piInspection === "expired"
+              ? "pi_kimi_credential_expired"
+              : piInspection === "invalid"
+                ? "pi_kimi_credential_invalid"
+                : piInspection === "error"
+                  ? "credential_resolution_failed"
+                  : undefined;
 
       let cliInspection;
       try {
@@ -189,17 +191,19 @@ export function createKimiAdapter(
           ? "credential_resolution_failed"
           : cliInspection === "invalid"
             ? "kimi_code_cli_credential_invalid"
-            : cliInspection === "expired"
-              ? "kimi_code_cli_credential_expired"
-              : cliInspection === "unsupported_storage"
-                ? "kimi_code_cli_credential_storage_unsupported"
-                : cliInspection === "unrecognized_region"
-                  ? "kimi_code_cli_region_unrecognized"
-                  : cliInspection === "invalid_config"
-                    ? "kimi_code_cli_config_invalid"
-                    : cliInspection === "environment_unconfirmed"
-                      ? KIMI_CODE_ENVIRONMENT_UNCONFIRMED
-                      : undefined;
+            : cliInspection === "expired_refreshable"
+              ? "kimi_code_cli_access_token_expired"
+              : cliInspection === "expired"
+                ? "kimi_code_cli_credential_expired"
+                : cliInspection === "unsupported_storage"
+                  ? "kimi_code_cli_credential_storage_unsupported"
+                  : cliInspection === "unrecognized_region"
+                    ? "kimi_code_cli_region_unrecognized"
+                    : cliInspection === "invalid_config"
+                      ? "kimi_code_cli_config_invalid"
+                      : cliInspection === "environment_unconfirmed"
+                        ? KIMI_CODE_ENVIRONMENT_UNCONFIRMED
+                        : undefined;
 
       return {
         provider: "kimi",
@@ -209,7 +213,8 @@ export function createKimiAdapter(
             status:
               piInspection === "available"
                 ? "available"
-                : piInspection === "expired"
+                : piInspection === "expired" ||
+                    piInspection === "expired_refreshable"
                   ? "expired"
                   : piError
                     ? "invalid"
@@ -236,6 +241,7 @@ function cliSourceStatus(
   inspection: KimiCodeCliCredentialInspection,
 ): "available" | "missing" | "invalid" | "expired" | "skipped" {
   if (inspection === "error") return "invalid";
+  if (inspection === "expired_refreshable") return "expired";
   if (
     inspection === "unsupported_storage" ||
     inspection === "unrecognized_region" ||
@@ -726,8 +732,8 @@ async function resolveCliCredential(
 function refreshableExpiryFailure(source: string): KimiFailure {
   return new KimiFailure(
     source === KIMI_CODE_CLI_CREDENTIAL_SOURCE
-      ? "kimi_code_cli_credential_expired"
-      : "pi_kimi_credential_expired",
+      ? "kimi_code_cli_access_token_expired"
+      : "pi_kimi_access_token_expired",
     {
       status: "unavailable",
       staleEligible: true,

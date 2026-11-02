@@ -49,7 +49,8 @@ export type KimiCodeCliCredentialResolution =
     };
 
 export type KimiCodeCliCredentialInspection =
-  KimiCodeCliCredentialResolution["status"];
+  | KimiCodeCliCredentialResolution["status"]
+  | "expired_refreshable";
 
 /**
  * One reading of `config.toml`, shared by everything a single run derives from
@@ -128,8 +129,12 @@ export function createKimiCodeCliCredentialSource(
     return selection;
   };
 
-  const inspect = async (): Promise<KimiCodeCliCredentialInspection> =>
-    (await resolveCredential(await select(), dependencies)).status;
+  const inspect = async (): Promise<KimiCodeCliCredentialInspection> => {
+    const resolution = await resolveCredential(await select(), dependencies);
+    return resolution.status === "expired" && resolution.refreshable
+      ? "expired_refreshable"
+      : resolution.status;
+  };
 
   return {
     select,

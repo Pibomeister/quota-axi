@@ -71,6 +71,7 @@ export type ProviderAuthStatus = "usable" | "expired_refreshable" | "unusable";
 export type ProviderStateReason =
   | "keychain_access_required"
   | "credentials_expired"
+  | "access_token_expired"
   | "inference_opt_in_required";
 
 export type QuotaPaceStatus = "ahead" | "on_pace" | "behind" | "unknown";

@@ -726,8 +726,8 @@ async function resolveCliCredential(
 function refreshableExpiryFailure(source: string): KimiFailure {
   return new KimiFailure(
     source === KIMI_CODE_CLI_CREDENTIAL_SOURCE
-      ? "kimi_code_cli_credential_expired"
-      : "pi_kimi_credential_expired",
+      ? "kimi_code_cli_access_token_expired"
+      : "pi_kimi_access_token_expired",
     {
       status: "unavailable",
       staleEligible: true,

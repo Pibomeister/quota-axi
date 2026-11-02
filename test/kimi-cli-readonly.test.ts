@@ -361,12 +361,12 @@ globalThis.fetch = async (input, init) => {
     expect(report.providers[0]?.state).toMatchObject({
       status: "unavailable",
       authStatus: "expired_refreshable",
-      error: "pi_kimi_credential_expired",
-      reason: "credentials_expired",
+      error: "pi_kimi_access_token_expired",
+      reason: "access_token_expired",
       remedyCommand: "pi",
     });
     expect(report.help).toContain(
-      "Tell your user: use a Kimi model in `pi` once so Pi refreshes its own Kimi session token; Pi refreshes a provider's token only when that provider is used. quota-axi stays read-only and never rotates Kimi credentials.",
+      "Kimi's access token expired; this is not a sign-out. Pi can renew it the next time a Kimi model is used in `pi`. quota-axi cannot confirm fresh quota until then. For a fresh reading now, use a Kimi model in `pi` once. quota-axi stays read-only and never rotates Kimi credentials.",
     );
 
     const toon = runCli(
@@ -378,7 +378,7 @@ globalThis.fetch = async (input, init) => {
       },
     );
     expect(toon.stdout).toContain(
-      "kimi,all,unavailable,pi_kimi_credential_expired · reason credentials_expired (auth expired_refreshable),pi",
+      "kimi,all,unavailable,pi_kimi_access_token_expired · reason access_token_expired (auth expired_refreshable),pi",
     );
     expect(spawnLog(fixture)).toBe("");
 
@@ -403,7 +403,7 @@ globalThis.fetch = async (input, init) => {
     expect(readFileSync(authPath, "utf8")).toBe(before);
   });
 
-  it("names the Kimi Code CLI as the remedy when that store is the soft-expired login", () => {
+  it("distinguishes a refreshable Kimi access token from an expired login", () => {
     const fixture = isolatedFixture();
     writeCliCredential(fixture, {
       access_token: "synthetic-expired-cli-access",
@@ -424,7 +424,7 @@ globalThis.fetch = async (input, init) => {
     expect(result.stdout).not.toContain("synthetic-cli-refresh-must-not-leak");
     expect(JSON.parse(result.stdout)).toMatchObject({
       help: [
-        "Tell your user: run a Kimi Code session with `kimi` once so Kimi Code refreshes its own session token. quota-axi stays read-only and never rotates Kimi credentials.",
+        "Kimi's access token expired; this is not a sign-out. Kimi Code can renew it on its next request. quota-axi cannot confirm fresh quota until then. For a fresh reading now, run a Kimi Code session with `kimi` once. quota-axi stays read-only and never rotates Kimi credentials.",
       ],
       providers: [
         {
@@ -432,13 +432,109 @@ globalThis.fetch = async (input, init) => {
           state: {
             status: "unavailable",
             authStatus: "expired_refreshable",
-            error: "kimi_code_cli_credential_expired",
-            reason: "credentials_expired",
+            error: "kimi_code_cli_access_token_expired",
+            reason: "access_token_expired",
             remedyCommand: "kimi",
           },
         },
       ],
     });
+  });
+
+  it("keeps cached Kimi quota stale without declaring the refreshable login expired", () => {
+    const fixture = isolatedFixture();
+    writeCliCredential(fixture, {
+      access_token: "synthetic-cli-access",
+      refresh_token: "synthetic-cli-refresh-must-not-leak",
+      expires_at: Date.now() / 1_000 + 3_600,
+    });
+    const vendorBin = vendorStubs(fixture);
+    const args = ["--provider", "kimi", "--json", "--full"];
+    const fresh = runCli(fixture, args, usagesOk(fixture), { PATH: vendorBin });
+    const freshProvider = JSON.parse(fresh.stdout).providers[0];
+    expect(freshProvider.state.status).toBe("fresh");
+
+    writeCliCredential(fixture, {
+      access_token: "synthetic-cli-access",
+      refresh_token: "synthetic-cli-refresh-must-not-leak",
+      expires_at: 1,
+    });
+    const credentialPath = join(
+      fixture.kimiCodeHome,
+      "credentials",
+      "kimi-code.json",
+    );
+    const before = readFileSync(credentialPath, "utf8");
+    const rejection = rejectUsages(fixture);
+    for (const json of [true, false]) {
+      const stale = runCli(
+        fixture,
+        ["--provider", "kimi", ...(json ? ["--json"] : []), "--full"],
+        rejection,
+        { PATH: vendorBin },
+      );
+      expect(stale.stderr).toBe("");
+      expect(stale.stdout).not.toContain("credentials_expired");
+      expect(stale.stdout).not.toContain("kimi_code_cli_credential_expired");
+      expect(stale.stdout).not.toContain("auth_required");
+      expect(stale.stdout).toContain("this is not a sign-out");
+      expect(stale.stdout).not.toContain("synthetic-cli-access");
+      expect(stale.stdout).not.toContain("synthetic-cli-refresh-must-not-leak");
+      if (json) {
+        expect(JSON.parse(stale.stdout).providers[0]).toMatchObject({
+          source: "cache",
+          windows: freshProvider.windows.map(
+            (window: Record<string, unknown>) => ({
+              ...window,
+              pace: { status: "unknown", reason: "stale" },
+            }),
+          ),
+          state: {
+            status: "stale",
+            stale: true,
+            refreshedAt: freshProvider.state.refreshedAt,
+            authStatus: "expired_refreshable",
+            error: "kimi_code_cli_access_token_expired",
+            reason: "access_token_expired",
+            remedyCommand: "kimi",
+          },
+        });
+      }
+    }
+    expect(spawnLog(fixture)).toBe("");
+    expect(readFileSync(credentialPath, "utf8")).toBe(before);
+  });
+
+  it.each([
+    { name: "expired without a refresh path", expires_at: 1 },
+    {
+      name: "rejected before stored expiry despite a refresh path",
+      expires_at: 4_102_444_800,
+      refresh_token: "synthetic-cli-refresh-must-not-leak",
+    },
+  ])("keeps a $name CLI credential as a hard rejection", (credential) => {
+    const fixture = isolatedFixture();
+    writeCliCredential(fixture, {
+      access_token: "synthetic-rejected-cli-access",
+      ...credential,
+    });
+    const result = runCli(
+      fixture,
+      ["--provider", "kimi", "--json", "--full"],
+      rejectUsages(fixture),
+      { PATH: vendorStubs(fixture) },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe("");
+    const report = JSON.parse(result.stdout);
+    expect(report.providers[0].state).toMatchObject({
+      status: "auth_required",
+      error: "provider_auth_rejected",
+    });
+    expect(report.providers[0].state.authStatus).toBeUndefined();
+    expect(report.providers[0].state.reason).toBeUndefined();
+    expect(report.help).toBeUndefined();
+    expect(spawnLog(fixture)).toBe("");
   });
 
   it("keeps the Pi remedy when both Kimi stores are soft-expired", () => {
@@ -474,8 +570,8 @@ globalThis.fetch = async (input, init) => {
       providers: [
         {
           state: {
-            error: "pi_kimi_credential_expired",
-            reason: "credentials_expired",
+            error: "pi_kimi_access_token_expired",
+            reason: "access_token_expired",
             remedyCommand: "pi",
           },
         },
@@ -573,8 +669,8 @@ globalThis.fetch = async (input, init) => {
             status: "stale",
             stale: true,
             authStatus: "expired_refreshable",
-            error: "pi_kimi_credential_expired",
-            reason: "credentials_expired",
+            error: "pi_kimi_access_token_expired",
+            reason: "access_token_expired",
             remedyCommand: "pi",
           },
         },

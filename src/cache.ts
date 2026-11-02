@@ -614,8 +614,8 @@ export function readCachedMuseProvider(
 
 /**
  * Factory Droid quota may only be reused when the cache record proves it was
- * captured with the same account (or API key), so one account's pools can never
- * stand in for another's.
+ * captured with the same account, so one account's pools can never stand in for
+ * another's.
  */
 export function readCachedDroidProvider(
   contextId: string,

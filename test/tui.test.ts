@@ -968,6 +968,53 @@ describe("Cursor pool scopes on the headline", () => {
   });
 });
 
+describe("Factory Droid window rows", () => {
+  it("names the pool and period on every row", () => {
+    const window = (
+      id: string,
+      label: string,
+      kind: "session" | "weekly" | "monthly",
+      percentRemaining: number,
+    ) => ({
+      id,
+      label,
+      kind,
+      percentUsed: 100 - percentRemaining,
+      percentRemaining,
+    });
+    const droid = withQuotaSemantics(
+      {
+        provider: "droid",
+        label: "Factory Droid",
+        source: "api",
+        windows: [
+          window("droid_core_5h", "Droid Core 5-hour", "session", 8),
+          window("droid_core_weekly", "Droid Core weekly", "weekly", 21),
+          window("droid_core_monthly", "Droid Core monthly", "monthly", 34),
+          window("other_models_5h", "Other models 5-hour", "session", 100),
+          window("other_models_weekly", "Other models weekly", "weekly", 98),
+          window("other_models_monthly", "Other models monthly", "monthly", 99),
+        ],
+        state: { status: "fresh", stale: false, sourcesTried: ["api"] },
+        attempts: [{ source: "api", status: "success" }],
+      },
+      GENERATED_AT,
+    );
+
+    const lines = renderQuotaTui(
+      { generatedAt: GENERATED_AT, schemaVersion: 5, providers: [droid] },
+      { timeZone: "America/Los_Angeles" },
+    ).split("\n");
+
+    expect(findLine(lines, "core 5h ")).toContain("8%");
+    expect(findLine(lines, "core wk ")).toContain("21%");
+    expect(findLine(lines, "core mo ")).toContain("34%");
+    expect(findLine(lines, "othr 5h ")).toContain("100%");
+    expect(findLine(lines, "othr wk ")).toContain("98%");
+    expect(findLine(lines, "othr mo ")).toContain("99%");
+  });
+});
+
 describe("used-share window rows", () => {
   it("prints percentUsed of the parent instead of a remaining bar or ?", () => {
     const kimi = withQuotaSemantics(

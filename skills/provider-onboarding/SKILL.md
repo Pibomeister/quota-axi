@@ -52,7 +52,7 @@ Credential selection is shared in `src/providers/credential-selection.ts`:
 - **Advisory stored expiry**: Stored `expiresAt` or `expired` fields are advisory only within a source, never a verdict or a reason to reorder declared sources.
 - **Empirical testing**: Stored-expired credentials are tested in that source's fixed priority position before any sign-in or expired verdict. An empirically live credential always wins.
 - **Transient failures**: Network errors, 5xx responses, or timeouts must never switch candidates within one source or become auth verdicts.
-- **Adapters using selection**: Grok, Codex, Kimi, Command Code, Copilot, OpenCode Go, Devin, and Muse route through `selectCredential`. Codex, Kimi, Copilot, and Devin call it once per source so each provider's ownership-stability order remains authoritative.
+- **Adapters using selection**: Grok, Codex, Kimi, Command Code, Copilot, OpenCode Go, Devin, Muse, and Factory Droid route through `selectCredential`. Codex, Kimi, Copilot, and Devin call it once per source so each provider's ownership-stability order remains authoritative.
 - **Probe token safety**: A broker's `expired` resolution carries the stored token for probe use only; it must never be logged, cached, or rendered.
 - **Profile-only mode**: `--profile-only` is the fail-closed single-account quota probe for Claude and Codex: it requires `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, reads only that profile's native credential file, and bypasses alternate sources, delegated refresh, and quota cache access (full JSON keeps non-secret account/source/attempt evidence; ordinary output stays redacted). Omitting the flag must preserve legacy discovery and cache behavior. Contract: [README Profile-only quota reads](../../README.md#profile-only-quota-reads).
 
@@ -85,7 +85,7 @@ Shared machinery lives in `src/providers/delegated-refresh.ts`. It is the **sing
   - Grok: `grok models`
   - Codex: `app-server` JSON-RPC probe
 
-  All other providers (Cursor, Copilot, Kimi, Z.AI, Alibaba, OpenCode Go, Antigravity, Command Code, MiniMax, MiMo, DeepSeek, OpenRouter, ElevenLabs, Devin, Muse, Higgsfield) remain strictly read-only.
+  All other providers (Cursor, Copilot, Kimi, Z.AI, Alibaba, OpenCode Go, Antigravity, Command Code, MiniMax, MiMo, DeepSeek, OpenRouter, ElevenLabs, Devin, Muse, Higgsfield, Factory Droid) remain strictly read-only.
 
 - **Option gating**: Delegated refresh is gated by `ProviderOptions.refreshCredentials`. `--no-credential-refresh` disables it; the `auth` command always passes `false`. Tests must specify it explicitly to prevent accidental CLI spawning.
 

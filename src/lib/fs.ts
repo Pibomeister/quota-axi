@@ -161,6 +161,17 @@ export function museKeychainAccessMarkerPath(
   return join(cacheDirPath(), `muse-keychain-access-granted-${suffix}`);
 }
 
+/** Non-secret proof scoped to the exact Factory Droid Keychain service and account. */
+export function droidKeychainAccessMarkerPath(
+  service: string,
+  account: string,
+): string {
+  const suffix = createHash("sha256")
+    .update(JSON.stringify([service, account]))
+    .digest("hex");
+  return join(cacheDirPath(), `droid-keychain-access-granted-${suffix}`);
+}
+
 /** Path of Muse's key-endpoint attempt ledger, beside the quota cache. */
 export function museKeyReadLedgerPath(): string {
   return join(cacheDirPath(), "muse-key-reads.json");

@@ -139,6 +139,7 @@ const MOCHA: Palette = {
     devin: { rgb: [126, 196, 224], ansi16: "96", bold: true },
     muse: { rgb: [0, 132, 255], ansi16: "94", bold: true },
     higgsfield: { rgb: [255, 176, 122], ansi16: "93", bold: true },
+    droid: { rgb: [255, 128, 64], ansi16: "91", bold: true },
   },
   styles: {
     dim: { rgb: [127, 132, 156], ansi16: "90" },
@@ -188,6 +189,7 @@ const LATTE: Palette = {
     devin: { rgb: [20, 130, 160], ansi16: "96", bold: true },
     muse: { rgb: [90, 80, 210], ansi16: "94", bold: true },
     higgsfield: { rgb: [200, 80, 20], ansi16: "93", bold: true },
+    droid: { rgb: [190, 70, 20], ansi16: "91", bold: true },
   },
   styles: {
     dim: { rgb: [124, 127, 147], ansi16: "90" },
@@ -1050,11 +1052,26 @@ function compactHeadlineWindowName(label: string, width: number): string {
 }
 
 /**
+ * Droid's two pools share the same three periods, so the generic compression
+ * below would lose the pool or the period. These rows name both.
+ */
+const DROID_ROW_LABELS: Readonly<Record<string, string>> = {
+  droid_core_5h: "core 5h",
+  droid_core_weekly: "core wk",
+  droid_core_monthly: "core mo",
+  other_models_5h: "othr 5h",
+  other_models_weekly: "othr wk",
+  other_models_monthly: "othr mo",
+};
+
+/**
  * Compress a window label into the 7-char row column: drop a trailing
  * period/unit token ("Fable week" -> "fable", "730h window" -> "730h"),
  * then fall back to the last hyphen segment and an ellipsis.
  */
 export function shortWindowLabel(window: QuotaWindow): string {
+  const droidLabel = DROID_ROW_LABELS[window.id];
+  if (droidLabel !== undefined) return droidLabel;
   const tokens = window.label.split(/[\s_]+/).filter(Boolean);
   if (
     tokens.length > 1 &&

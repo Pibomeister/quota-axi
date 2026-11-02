@@ -236,7 +236,7 @@ function droidSemantics(
     const unparsed = untrustedWindowIds.filter(
       (id) => known(id) && id.startsWith(prefix),
     );
-    if (bounds.length === 0) continue;
+    if (bounds.length === 0 && unparsed.length === 0) continue;
     effectiveAvailability.push(
       unparsed.length > 0
         ? unresolvedAvailability(scope, bounds, unparsed)

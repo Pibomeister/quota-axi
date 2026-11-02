@@ -14,19 +14,18 @@ import {
   normalizeDroidPayload,
 } from "../../src/providers/droid.js";
 import { droidCacheContextId } from "../../src/providers/droid-cache-context.js";
-import {
-  createDroidApiKeySource,
-  type DroidCredentialSource,
-  type DroidLocalResolution,
+import type {
+  DroidCredentialSource,
+  DroidLocalResolution,
 } from "../../src/providers/droid-credential.js";
 import type { ProviderQuota } from "../../src/types.js";
 
 const NOW = Date.parse("2026-10-31T12:00:00.000Z");
 const OPTIONS = { allowKeychainPrompt: false, refreshCredentials: false };
 // Synthetic. No real Factory credential, balance, or account data appears here.
-const API_KEY = "synthetic-factory-api-key-901";
+const ACCESS_TOKEN = "synthetic-factory-access-token-901";
 const SENTINELS = [
-  API_KEY,
+  ACCESS_TOKEN,
   "SENTINEL-OVERAGE-PREFERENCE",
   "sentinel-droid-user@example.invalid",
 ];
@@ -88,8 +87,7 @@ function resolvedSource(
     resolve: () =>
       Promise.resolve({
         status: "resolved",
-        credential: API_KEY,
-        kind: "session",
+        credential: ACCESS_TOKEN,
         identity: "user-1|org-1",
         expired: false,
         refreshable: false,
@@ -357,13 +355,44 @@ describe("Droid effective availability", () => {
     expect(scopes.other_models!.status).toBe("unknown");
     expect(scopes.droid_core).toMatchObject({ effectivePercentRemaining: 24 });
   });
+
+  it.each([
+    ["droid_core", "core", "other_models"],
+    ["other_models", "standard", "droid_core"],
+  ])(
+    "keeps %s as an unknown scope when its pool has no parsable meter",
+    (scope, vendorKey, sibling) => {
+      const body = limitsBody();
+      (body.limits as Record<string, unknown>)[vendorKey] = {};
+      const semantics = semanticsFor(body);
+      expect(semantics.status).toBe("partial");
+      const scopes = Object.fromEntries(
+        semantics.effectiveAvailability.map((entry) => [entry.scope, entry]),
+      );
+      expect(scopes[scope]).toMatchObject({
+        status: "unknown",
+        boundedBy: [],
+        selection: { status: "unknown" },
+      });
+      expect(scopes[sibling]!.status).not.toBe("unknown");
+    },
+  );
+
+  it("publishes no scope for a pool the vendor omits", () => {
+    const body = limitsBody();
+    delete (body.limits as Record<string, unknown>).core;
+    const semantics = semanticsFor(body);
+    expect(semantics.effectiveAvailability.map(({ scope }) => scope)).toEqual([
+      "other_models",
+    ]);
+  });
 });
 
 describe("Factory Droid adapter", () => {
   it("fetches Factory's own limits endpoint with a bearer token and reports both pools", async () => {
     const fetch = vi.fn(() => Promise.resolve(jsonResponse(limitsBody())));
     const adapter = adapterWith(
-      [createDroidApiKeySource({ FACTORY_API_KEY: API_KEY })],
+      [resolvedSource("cli-keychain")],
       fetch as unknown as typeof globalThis.fetch,
     );
 
@@ -376,7 +405,7 @@ describe("Factory Droid adapter", () => {
     expect(init.redirect).toBe("manual");
     expect(init.credentials).toBe("omit");
     expect((init.headers as Record<string, string>).Authorization).toBe(
-      `Bearer ${API_KEY}`,
+      `Bearer ${ACCESS_TOKEN}`,
     );
     expect(report).toMatchObject({
       provider: "droid",
@@ -392,7 +421,7 @@ describe("Factory Droid adapter", () => {
     expect(serialized).not.toContain("123456");
   });
 
-  it("prefers the Droid CLI's own sign-in over the exported API key", async () => {
+  it("stops at the first credential that answers", async () => {
     const seen: string[] = [];
     const fetch = vi.fn((_url: string, init: RequestInit) => {
       seen.push((init.headers as Record<string, string>).Authorization!);
@@ -401,7 +430,7 @@ describe("Factory Droid adapter", () => {
     const adapter = adapterWith(
       [
         resolvedSource("cli-keychain", { credential: "session-token" }),
-        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+        resolvedSource("cli-keyfile"),
       ],
       fetch as unknown as typeof globalThis.fetch,
     );
@@ -412,7 +441,7 @@ describe("Factory Droid adapter", () => {
       report.attempts?.map(({ source, status }) => [source, status]),
     ).toEqual([
       ["cli-keychain", "success"],
-      ["env:FACTORY_API_KEY", "skipped"],
+      ["cli-keyfile", "skipped"],
     ]);
   });
 
@@ -460,13 +489,12 @@ describe("Factory Droid adapter", () => {
     expect(report.state.reason).toBeUndefined();
     expect(report.windows).toEqual([]);
     expect(
-      readCachedDroidProvider(droidCacheContextId("session", "user-1|org-1")),
+      readCachedDroidProvider(droidCacheContextId("user-1|org-1")),
     ).toBeUndefined();
   });
 
   it("serves only the expired session's cache when a revoked sibling is also rejected", async () => {
-    const revoked = resolvedSource("env:FACTORY_API_KEY", {
-      kind: "api_key",
+    const revoked = resolvedSource("cli-keyfile", {
       identity: "revoked-key",
     });
     const expired = resolvedSource("cli-keychain", {
@@ -488,7 +516,7 @@ describe("Factory Droid adapter", () => {
     ["answers", 200, "fresh"],
     ["fails transiently", 503, "error"],
   ])(
-    "keeps declared order: an expired token that %s stops before the API key",
+    "keeps declared order: an expired token that %s stops before the next source",
     async (_label, status, reported) => {
       const seen: string[] = [];
       const fetch = vi.fn((_url: string, init: RequestInit) => {
@@ -506,7 +534,7 @@ describe("Factory Droid adapter", () => {
             expired: true,
             refreshable: true,
           }),
-          createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+          resolvedSource("cli-keyfile"),
         ],
         fetch as unknown as typeof globalThis.fetch,
       ).fetchQuota(OPTIONS);
@@ -534,12 +562,12 @@ describe("Factory Droid adapter", () => {
           expired: true,
           refreshable: true,
         }),
-        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+        resolvedSource("cli-keyfile"),
       ],
       fetch as unknown as typeof globalThis.fetch,
     ).fetchQuota(OPTIONS);
 
-    expect(seen).toEqual(["Bearer expired-token", `Bearer ${API_KEY}`]);
+    expect(seen).toEqual(["Bearer expired-token", `Bearer ${ACCESS_TOKEN}`]);
     expect(report.state).toMatchObject({
       status: "fresh",
       authStatus: "usable",
@@ -549,10 +577,7 @@ describe("Factory Droid adapter", () => {
 
   it("marks a broken store superseded by a working sibling without failing the reading", async () => {
     const report = await adapterWith(
-      [
-        brokenSource("cli-keyfile"),
-        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
-      ],
+      [brokenSource("cli-keychain"), resolvedSource("cli-keyfile")],
       (() =>
         Promise.resolve(
           jsonResponse(limitsBody()),
@@ -561,7 +586,7 @@ describe("Factory Droid adapter", () => {
 
     expect(report.state.status).toBe("fresh");
     expect(report.attempts?.[0]).toMatchObject({
-      source: "cli-keyfile",
+      source: "cli-keychain",
       status: "failed",
       error: "droid_auth_undecryptable",
       credentialPresent: true,
@@ -569,14 +594,13 @@ describe("Factory Droid adapter", () => {
   });
 
   it("reports a broken store rather than a sign-out when a sibling is rejected, and keeps the cache", async () => {
-    const sibling = resolvedSource("env:FACTORY_API_KEY", {
-      kind: "api_key",
+    const sibling = resolvedSource("cli-keyfile", {
       identity: "old-key",
     });
     await seedCache(sibling);
 
     const report = await adapterWith(
-      [brokenSource("cli-keyfile"), sibling],
+      [brokenSource("cli-keychain"), sibling],
       rejecting,
     ).fetchQuota(OPTIONS);
 
@@ -586,7 +610,7 @@ describe("Factory Droid adapter", () => {
     });
     expect(report.state.authStatus).toBeUndefined();
     expect(
-      readCachedDroidProvider(droidCacheContextId("api-key", "old-key")),
+      readCachedDroidProvider(droidCacheContextId("old-key")),
     ).toBeDefined();
   });
 
@@ -595,10 +619,7 @@ describe("Factory Droid adapter", () => {
       Promise.resolve(new Response("{}", { status: 503 })),
     );
     const report = await adapterWith(
-      [
-        resolvedSource("cli-keychain"),
-        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
-      ],
+      [resolvedSource("cli-keychain"), resolvedSource("cli-keyfile")],
       fetch as unknown as typeof globalThis.fetch,
     ).fetchQuota(OPTIONS);
 
@@ -608,7 +629,7 @@ describe("Factory Droid adapter", () => {
       report.attempts?.map(({ source, status }) => [source, status]),
     ).toEqual([
       ["cli-keychain", "failed"],
-      ["env:FACTORY_API_KEY", "skipped"],
+      ["cli-keyfile", "skipped"],
     ]);
   });
 
@@ -628,8 +649,7 @@ describe("Factory Droid adapter", () => {
     });
     expect(report.source).toBe("cache");
     expect(
-      readCachedDroidProvider(droidCacheContextId("session", "user-1|org-1"))
-        ?.windows,
+      readCachedDroidProvider(droidCacheContextId("user-1|org-1"))?.windows,
     ).toHaveLength(6);
   });
 
@@ -679,7 +699,7 @@ describe("Factory Droid adapter", () => {
 
   it("serves the last reading from the same account as stale when Factory is unavailable", async () => {
     const source = resolvedSource("cli-keychain");
-    const contextId = droidCacheContextId("session", "user-1|org-1");
+    const contextId = droidCacheContextId("user-1|org-1");
     const first = await adapterWith([source], (() =>
       Promise.resolve(
         jsonResponse(limitsBody()),
@@ -726,7 +746,13 @@ describe("Factory Droid adapter", () => {
   it("reports no credential as auth_required without any request", async () => {
     const fetch = vi.fn();
     const adapter = adapterWith(
-      [createDroidApiKeySource({})],
+      [
+        {
+          name: "cli-keyfile",
+          location: () => "~/.factory/auth.v2.file",
+          resolve: () => Promise.resolve({ status: "absent" }),
+        },
+      ],
       fetch as unknown as typeof globalThis.fetch,
     );
     const report = await adapter.fetchQuota(OPTIONS);
@@ -763,7 +789,7 @@ describe("Factory Droid adapter", () => {
     const adapter = adapterWith(
       [
         resolvedSource("cli-keychain", { expired: true, refreshable: true }),
-        createDroidApiKeySource({ FACTORY_API_KEY: API_KEY }),
+        resolvedSource("cli-keyfile"),
       ],
       fetch as unknown as typeof globalThis.fetch,
     );
@@ -774,8 +800,8 @@ describe("Factory Droid adapter", () => {
       report.sources.map(({ source, status }) => [source, status]),
     ).toEqual([
       ["cli-keychain", "expired"],
-      ["env:FACTORY_API_KEY", "available"],
+      ["cli-keyfile", "available"],
     ]);
-    expect(JSON.stringify(report)).not.toContain(API_KEY);
+    expect(JSON.stringify(report)).not.toContain(ACCESS_TOKEN);
   });
 });

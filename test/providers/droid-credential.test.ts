@@ -117,7 +117,6 @@ describe("Droid key-file credential source", () => {
     expect(resolution).toEqual({
       status: "resolved",
       credential: token,
-      kind: "session",
       identity: "user-1\0org-1",
       expired: false,
       refreshable: true,
@@ -242,7 +241,6 @@ describe("Droid Keychain credential source", () => {
     expect(first).toMatchObject({
       status: "resolved",
       credential: token,
-      kind: "session",
       identity: "user-1\0org-1",
     });
     expect(security.calls.some((args) => args.includes("-w"))).toBe(true);
@@ -266,34 +264,5 @@ describe("Droid Keychain credential source", () => {
     expect(
       await createDroidKeychainSource(env()).resolve(PROMPT_OPTIONS),
     ).toEqual({ status: "absent" });
-  });
-});
-
-describe("Droid API-key credential source", () => {
-  it("selects the exported key with its own non-reversible identity kind", async () => {
-    const { createDroidApiKeySource } = await credentialModule();
-    expect(
-      await createDroidApiKeySource({
-        FACTORY_API_KEY: " fk-synthetic-1 ",
-      }).resolve(OPTIONS),
-    ).toMatchObject({
-      status: "resolved",
-      credential: "fk-synthetic-1",
-      kind: "api_key",
-      refreshable: false,
-      expired: false,
-    });
-  });
-
-  it("treats a blank variable as absent", async () => {
-    const { createDroidApiKeySource } = await credentialModule();
-    expect(
-      await createDroidApiKeySource({ FACTORY_API_KEY: "   " }).resolve(
-        OPTIONS,
-      ),
-    ).toEqual({ status: "absent" });
-    expect(await createDroidApiKeySource({}).resolve(OPTIONS)).toEqual({
-      status: "absent",
-    });
   });
 });

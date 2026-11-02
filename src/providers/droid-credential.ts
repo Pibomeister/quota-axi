@@ -30,7 +30,6 @@ import type { ProviderOptions } from "../types.js";
  */
 const DROID_KEYCHAIN_SOURCE = "cli-keychain";
 const DROID_KEYFILE_SOURCE = "cli-keyfile";
-const DROID_API_KEY_SOURCE = "env:FACTORY_API_KEY";
 export const DROID_KEYCHAIN_SERVICE = "Factory CLI";
 export const DROID_KEYCHAIN_ACCOUNT = "auth-encryption-key-security-cli";
 
@@ -52,8 +51,6 @@ export type DroidLocalResolution =
   | {
       status: "resolved";
       credential: string;
-      /** `session` is a stored WorkOS token; `api_key` is `FACTORY_API_KEY`. */
-      kind: "session" | "api_key";
       /** Non-secret account discriminator; hashed before any use. */
       identity: string;
       /** Advisory only: the stored token's own `exp` has passed. */
@@ -154,35 +151,6 @@ export function createDroidKeyfileSource(
   };
 }
 
-/** The explicitly exported `FACTORY_API_KEY`, read on the same footing. */
-export function createDroidApiKeySource(
-  environment: Environment = process.env,
-): DroidCredentialSource {
-  return {
-    name: DROID_API_KEY_SOURCE,
-    location: () => "FACTORY_API_KEY",
-    resolve() {
-      const raw = environment.FACTORY_API_KEY;
-      // A blank variable selects nothing rather than reporting a broken key.
-      if (raw === undefined || raw.trim().length === 0)
-        return Promise.resolve({ status: "absent" });
-      const credential = usableLiteralSecret(raw.trim());
-      return Promise.resolve(
-        credential === undefined
-          ? { status: "structurally_invalid", error: "factory_api_key_invalid" }
-          : {
-              status: "resolved",
-              credential,
-              kind: "api_key",
-              identity: credential,
-              expired: false,
-              refreshable: false,
-            },
-      );
-    },
-  };
-}
-
 type StoreRead =
   | { status: "ok"; text: string }
   | { status: "failed"; resolution: DroidLocalResolution };
@@ -276,7 +244,6 @@ function resolveBundle(text: string, key: Uint8Array): DroidLocalResolution {
   return {
     status: "resolved",
     credential,
-    kind: "session",
     identity,
     expired: exp !== undefined && exp * 1000 <= Date.now(),
     refreshable: Object.hasOwn(record, "refresh_token"),

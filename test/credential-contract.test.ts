@@ -1019,14 +1019,12 @@ describe("credential source contract", { timeout: 30_000 }, () => {
   });
 
   /**
-   * Droid has three sources in ownership order: the CLI's Keychain-keyed store,
-   * its key-file store, and an exported `FACTORY_API_KEY`. An absent store is
-   * not a degraded one, a present but unusable one is a credential that exists,
+   * Droid has two sources in ownership order: the CLI's Keychain-keyed store
+   * and its key-file store. An absent store is not a degraded one, a present but unusable one is a credential that exists,
    * and nothing unusable - nor the bundle's refresh token - is ever sent.
    */
   describe("droid", () => {
     const keyfile = "cli-keyfile";
-    const env = "env:FACTORY_API_KEY";
     const key = randomBytes(32);
 
     /**
@@ -1082,7 +1080,6 @@ describe("credential source contract", { timeout: 30_000 }, () => {
       expect(report.sources.map(({ source }) => source)).toEqual([
         "cli-keychain",
         keyfile,
-        env,
       ]);
     });
 
@@ -1091,18 +1088,16 @@ describe("credential source contract", { timeout: 30_000 }, () => {
 
       const result = await asLinux(() => readQuota("droid"));
 
-      for (const source of [keyfile, env]) {
-        const attempts = attemptsFor(result, source);
-        expect(attempts.length).toBeGreaterThan(0);
-        for (const attempt of attempts)
-          expect(attempt.credentialPresent).toBeUndefined();
-      }
+      const attempts = attemptsFor(result, keyfile);
+      expect(attempts.length).toBeGreaterThan(0);
+      for (const attempt of attempts)
+        expect(attempt.credentialPresent).toBeUndefined();
       expect(api.bearers).toEqual([]);
       expect(result.state.status).toBe("auth_required");
     });
 
-    it("never sends a blank FACTORY_API_KEY", async () => {
-      process.env.FACTORY_API_KEY = "   ";
+    it("never sends an exported FACTORY_API_KEY", async () => {
+      process.env.FACTORY_API_KEY = "factory-contract-fixture";
       const api = stubRejectingApi();
 
       const result = await asLinux(() => readQuota("droid"));
@@ -1111,35 +1106,15 @@ describe("credential source contract", { timeout: 30_000 }, () => {
       expect(result.state.status).toBe("auth_required");
     });
 
-    it.each([
-      ["an environment reference", "$FACTORY_API_KEY"],
-      ["a command reference", "!op read op://vault/key"],
-      ["a control byte", "factory-\u0007-fixture"],
-    ])(
-      "never sends %s from FACTORY_API_KEY, and does not call that a sign-out",
-      async (_label, value) => {
-        process.env.FACTORY_API_KEY = value;
-        const api = stubRejectingApi();
-
-        const result = await asLinux(() => readQuota("droid"));
-
-        expect(api.bearers).toEqual([]);
-        expect(result.state.status).toBe("error");
-        expect(result.state.error).toBe("factory_api_key_invalid");
-        expect(result.state.authStatus).toBeUndefined();
-      },
-    );
-
-    it("marks an undecryptable store as a credential that exists, then hands over", async () => {
+    it("marks an undecryptable store as a credential that exists, and sends nothing", async () => {
       writeDroidStore("not:an:encrypted-bundle");
-      process.env.FACTORY_API_KEY = "factory-contract-fixture";
       const api = stubRejectingApi();
 
       const result = await asLinux(() => readQuota("droid"));
 
       for (const attempt of attemptsFor(result, keyfile))
         expect(attempt.credentialPresent).toBe(true);
-      expect(api.bearers).toEqual(["Bearer factory-contract-fixture"]);
+      expect(api.bearers).toEqual([]);
       expect(result.state.status).toBe("error");
       expect(result.state.error).toBe("droid_auth_undecryptable");
     });

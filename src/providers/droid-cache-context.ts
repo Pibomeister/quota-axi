@@ -28,21 +28,17 @@ export function droidReadingContextId(): string | undefined {
 /**
  * Opaque SHA-256 of an account identity the credential itself carries: the
  * `sub` and `org_id` claims of a stored session token, which stay the same
- * across the short-lived token's rotation, or a one-way digest of an exported
- * `FACTORY_API_KEY`, which is itself the account. Neither the claims nor the key
- * enter the cache, are rendered, or are logged: only this digest is, and it
- * cannot be reversed.
+ * across the short-lived token's rotation. The claims do not enter the cache,
+ * are not rendered, and are not logged: only this digest is, and it cannot be
+ * reversed.
  *
  * A token the Droid CLI has since rotated therefore still reaches its own
- * stale snapshot, while a different user, organization, or key is a cache
- * miss and never a cross-attribution.
+ * stale snapshot, while a different user or organization is a cache miss and
+ * never a cross-attribution.
  */
-export function droidCacheContextId(
-  kind: "session" | "api-key",
-  identity: string,
-): string {
+export function droidCacheContextId(identity: string): string {
   const identityDigest = createHash("sha256")
-    .update(`droid-identity-v1\0${kind}\0${identity}`)
+    .update(`droid-identity-v1\0${identity}`)
     .digest("hex");
   return createHash("sha256").update(`droid\0${identityDigest}`).digest("hex");
 }

@@ -34,7 +34,6 @@ import {
   publishDroidReadingContextId,
 } from "./droid-cache-context.js";
 import {
-  createDroidApiKeySource,
   createDroidKeychainSource,
   createDroidKeyfileSource,
   type DroidCredentialSource,
@@ -53,16 +52,13 @@ export const DROID_API_ORIGIN = "https://api.factory.ai";
 export const DROID_LIMITS_PATH = "/api/billing/limits";
 
 /**
- * Ownership-stability order. The Droid CLI's own sign-in store comes first
- * (Keychain, then its key file), because it is the credential the CLI itself
- * sends to this endpoint. `FACTORY_API_KEY` is the explicitly exported
- * alternative and is consulted only when the CLI's store is absent or its token
- * is rejected.
+ * Ownership-stability order: the Droid CLI's own sign-in store, Keychain first
+ * and then its key file. That is the credential the CLI itself sends to this
+ * endpoint, so the reported pools belong to the signed-in Droid account.
  */
 const DROID_SOURCE_ORDER = [
   createDroidKeychainSource,
   createDroidKeyfileSource,
-  createDroidApiKeySource,
 ] as const;
 
 /**
@@ -385,10 +381,7 @@ function contextIdFor(
   // A session token that names no user earns no identity, so its reading is
   // neither cached nor served stale rather than attributed to a guess.
   return resolution.identity
-    ? droidCacheContextId(
-        resolution.kind === "api_key" ? "api-key" : "session",
-        resolution.identity,
-      )
+    ? droidCacheContextId(resolution.identity)
     : undefined;
 }
 

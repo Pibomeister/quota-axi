@@ -627,7 +627,7 @@ An unknown or stale scope deliberately gets **no** `quota[]` row: the absence of
 
 ### Output tiers
 
-`--full` adds; it never subtracts. Default TOON carries the three decision blocks; `--full` TOON adds the `providers[]`, `windows[]`, `scopeAudit[]`, `accounts[]`, and `attempts[]` audit blocks. Default `--json` carries the normalized model with derivation inputs demoted; `--full` restores them with **no renames and no re-nesting** - a demoted field is simply absent until `--full`, in the exact position and under the exact name it has there.
+`--full` adds; it never subtracts. Default TOON carries the three decision blocks (`quota[]`, `exhaustion[]`, `attention[]`), plus a `modelPools[]` block after `quota[]` whenever a Cursor or Factory pool scope is shown; `--full` TOON adds the `providers[]`, `windows[]`, `scopeAudit[]`, `accounts[]`, and `attempts[]` audit blocks. Default `--json` carries the normalized model with derivation inputs demoted; `--full` restores them with **no renames and no re-nesting** - a demoted field is simply absent until `--full`, in the exact position and under the exact name it has there.
 
 | Demoted to `--full` in `--json`                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- |

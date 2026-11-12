@@ -178,17 +178,19 @@ type ModelPoolRow = {
   accountKey?: string;
   scope: string;
   models: string;
+  observed: string;
 };
 
 function modelPoolRows(response: QuotaAxiResponse): ModelPoolRow[] {
   const rows: ModelPoolRow[] = [];
   for (const provider of response.providers) {
     for (const scope of provider.quotaSemantics?.effectiveAvailability ?? []) {
-      if (!scope.models?.length) continue;
+      if (!scope.models?.length || !scope.observed) continue;
       rows.push({
         ...providerColumns(provider),
         scope: scope.scope,
         models: scope.models.join(ID_SEPARATOR),
+        observed: scope.observed,
       });
     }
   }

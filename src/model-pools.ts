@@ -3,6 +3,8 @@ import {
   type FactoryMultiplier,
   type ModelPoolRule,
 } from "./model-pools.data.js";
+
+export { MODEL_POOL_DATA, type ModelPoolData } from "./model-pools.data.js";
 import type { ProviderId } from "./types.js";
 
 /** A model id the catalog does not place. Never a guessed scope. */
@@ -40,8 +42,9 @@ export function modelPoolMatchers(
 }
 
 /**
- * Factory multiplier recorded for `modelId` on calendar day `on`.
- * Missing when the id or the day has no recorded rate.
+ * Factory multiplier recorded for page label `modelId` on calendar day `on`.
+ * The key is the recorded page label, not a confirmed registry id.
+ * Missing when the label or the day has no recorded rate.
  */
 export function factoryMultiplier(
   modelId: string,
@@ -50,7 +53,7 @@ export function factoryMultiplier(
   const day = calendarDay(on);
   if (!day) return undefined;
   const entry = MODEL_POOL_DATA.factoryMultipliers.find(
-    (candidate) => candidate.id === modelId.trim(),
+    (candidate) => candidate.pageLabel === modelId.trim(),
   );
   if (!entry) return undefined;
   const rate = entry.rates.find((candidate) => rateCovers(candidate, day));
@@ -96,12 +99,14 @@ function assertCatalog(): void {
   }
   const multiplierIds = new Set<string>();
   for (const entry of MODEL_POOL_DATA.factoryMultipliers) {
-    if (multiplierIds.has(entry.id)) {
-      throw new Error(`duplicate Factory multiplier id ${entry.id}`);
+    if (multiplierIds.has(entry.pageLabel)) {
+      throw new Error(`duplicate Factory page label ${entry.pageLabel}`);
     }
-    multiplierIds.add(entry.id);
-    if (resolveModelPool("droid", entry.id) === UNKNOWN_MODEL_POOL) {
-      throw new Error(`${entry.id} has a multiplier and no Factory pool`);
+    multiplierIds.add(entry.pageLabel);
+    if (resolveModelPool("droid", entry.pageLabel) === UNKNOWN_MODEL_POOL) {
+      throw new Error(
+        `${entry.pageLabel} has a multiplier and no Factory pool`,
+      );
     }
     assertRates(entry);
   }
@@ -130,29 +135,33 @@ function assertCatalog(): void {
 
 function assertRates(entry: FactoryMultiplier): void {
   if (entry.rates.length === 0) {
-    throw new Error(`${entry.id} has no multiplier rates`);
+    throw new Error(`${entry.pageLabel} has no multiplier rates`);
   }
   let previousUntil: string | undefined;
   entry.rates.forEach((rate, index) => {
     if (!calendarDay(rate.from) || !(rate.multiplier > 0)) {
       throw new Error(
-        `${entry.id} rate ${index} is not a dated positive multiplier`,
+        `${entry.pageLabel} rate ${index} is not a dated positive multiplier`,
       );
     }
     if (rate.until !== undefined && !calendarDay(rate.until)) {
-      throw new Error(`${entry.id} rate ${index} until is not a calendar day`);
+      throw new Error(
+        `${entry.pageLabel} rate ${index} until is not a calendar day`,
+      );
     }
     if (rate.until !== undefined && rate.until <= rate.from) {
-      throw new Error(`${entry.id} rate ${index} ends before it starts`);
+      throw new Error(`${entry.pageLabel} rate ${index} ends before it starts`);
     }
     if (index === 0 && rate.from !== MODEL_POOL_DATA.observed) {
-      throw new Error(`${entry.id} does not start on the observed date`);
+      throw new Error(`${entry.pageLabel} does not start on the observed date`);
     }
     if (index > 0 && rate.from !== previousUntil) {
-      throw new Error(`${entry.id} rates leave a gap or an overlap`);
+      throw new Error(`${entry.pageLabel} rates leave a gap or an overlap`);
     }
     if (index < entry.rates.length - 1 && rate.until === undefined) {
-      throw new Error(`${entry.id} has an open rate before the last one`);
+      throw new Error(
+        `${entry.pageLabel} has an open rate before the last one`,
+      );
     }
     previousUntil = rate.until;
   });

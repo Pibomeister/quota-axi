@@ -234,6 +234,11 @@ export type EffectiveAvailability = {
    * id that starts with the text before it. Not a measurement.
    */
   models?: string[];
+  /**
+   * Calendar day the model-pool catalog was recorded. Present only beside
+   * `models`. Not a measurement, and not a claim the catalog is still current.
+   */
+  observed?: string;
   status: "known" | "unknown";
   effectivePercentRemaining?: number;
   boundedBy: string[];

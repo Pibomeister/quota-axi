@@ -124,10 +124,7 @@ describe("model pool catalog", () => {
   });
 
   it("maps Cursor house models to pool:auto and API families to pool:api", () => {
-    expect(modelPoolMatchers("cursor", "pool:auto")).toEqual([
-      "composer-*",
-      "grok-*",
-    ]);
+    expect(modelPoolMatchers("cursor", "pool:auto")).toEqual(["composer-*"]);
     expect(modelPoolMatchers("cursor", "pool:api")).toEqual([
       "claude-*",
       "gpt-*",
@@ -135,7 +132,7 @@ describe("model pool catalog", () => {
       "codex-*",
     ]);
     expect(resolveModelPool("cursor", "composer-2.5")).toBe("pool:auto");
-    expect(resolveModelPool("cursor", "grok-4.7")).toBe("pool:auto");
+    expect(resolveModelPool("cursor", "grok-4.7")).toBe(UNKNOWN_MODEL_POOL);
     expect(resolveModelPool("cursor", "claude-opus-5.5")).toBe("pool:api");
     expect(resolveModelPool("cursor", "gpt-6.1-sol")).toBe("pool:api");
     expect(resolveModelPool("cursor", "gpt-5-codex")).toBe("pool:api");
@@ -169,9 +166,9 @@ describe("model pool catalog", () => {
 
 describe("Factory multipliers", () => {
   it("returns each recorded rate on the observed day", () => {
-    expect(MODEL_POOL_DATA.factoryMultipliers.map((entry) => entry.id)).toEqual(
-      FACTORY_RATES.map(([id]) => id),
-    );
+    expect(
+      MODEL_POOL_DATA.factoryMultipliers.map((entry) => entry.pageLabel),
+    ).toEqual(FACTORY_RATES.map(([id]) => id));
     for (const [id, multiplier] of FACTORY_RATES) {
       expect(factoryMultiplier(id, OBSERVED), id).toBe(multiplier);
     }
@@ -213,8 +210,8 @@ describe("model pools in quota output", () => {
     };
 
     const toon = renderQuotaToon(response, "/usr/bin/quota-axi", false);
-    expect(toon).toContain("modelPools[4]{provider,scope,models}:");
-    expect(toon).toContain('cursor,"pool:auto",composer-* + grok-*');
+    expect(toon).toContain("modelPools[4]{provider,scope,models,observed}:");
+    expect(toon).toContain(`cursor,"pool:auto",composer-*,${OBSERVED}`);
     expect(toon).toContain(
       'cursor,"pool:api",claude-* + gpt-* + gemini-* + codex-*',
     );
@@ -236,7 +233,8 @@ describe("model pools in quota output", () => {
     const core = json.providers[1]?.quotaSemantics?.effectiveAvailability.find(
       (scope) => scope.scope === "droid_core",
     );
-    expect(cursorAuto?.models).toEqual(["composer-*", "grok-*"]);
+    expect(cursorAuto?.models).toEqual(["composer-*"]);
+    expect(cursorAuto?.observed).toBe(OBSERVED);
     expect(cursorApi?.models).toEqual([
       "claude-*",
       "gpt-*",
@@ -260,6 +258,7 @@ describe("model pools in quota output", () => {
       (scope) => scope.scope === "pool:auto",
     );
     expect(auto?.status).toBe("unknown");
-    expect(auto?.models).toEqual(["composer-*", "grok-*"]);
+    expect(auto?.models).toEqual(["composer-*"]);
+    expect(auto?.observed).toBe(OBSERVED);
   });
 });

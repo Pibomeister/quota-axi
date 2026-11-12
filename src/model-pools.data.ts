@@ -10,8 +10,10 @@ import type { ProviderId } from "./types.js";
  * A `prefixes` entry matches only an id that starts with that text and is
  * longer than it. Anything else stays unknown.
  *
- * Frontier multiplier ids are the recorded page labels: lowercase, spaces
- * become hyphens, and Claude family names keep a `claude-` prefix.
+ * `pageLabel` is that recorded page label: lowercase, spaces become
+ * hyphens, and Claude family names keep a `claude-` prefix. It is not a
+ * confirmed Factory registry id. Cursor's recorded context names Cursor
+ * Grok as a house model and gives no id, so `pool:auto` does not list one.
  */
 export type ModelPoolRule = {
   ids?: readonly string[];
@@ -25,7 +27,7 @@ export type FactoryMultiplierRate = {
 };
 
 export type FactoryMultiplier = {
-  id: string;
+  pageLabel: string;
   label: string;
   rates: readonly FactoryMultiplierRate[];
 };
@@ -74,7 +76,7 @@ export const MODEL_POOL_DATA: ModelPoolData = {
     cursor: {
       scopes: {
         "pool:auto": {
-          prefixes: ["composer-", "grok-"],
+          prefixes: ["composer-"],
         },
         "pool:api": {
           prefixes: ["claude-", "gpt-", "gemini-", "codex-"],
@@ -84,37 +86,37 @@ export const MODEL_POOL_DATA: ModelPoolData = {
   },
   factoryMultipliers: [
     {
-      id: "claude-opus-5.5",
+      pageLabel: "claude-opus-5.5",
       label: "Opus 5.5",
       rates: [{ multiplier: 1.6, from: "2026-11-11" }],
     },
     {
-      id: "claude-sonnet-5.5",
+      pageLabel: "claude-sonnet-5.5",
       label: "Sonnet 5.5",
       rates: [{ multiplier: 0.8, from: "2026-11-11" }],
     },
     {
-      id: "claude-haiku-5.5",
+      pageLabel: "claude-haiku-5.5",
       label: "Haiku 5.5",
       rates: [{ multiplier: 0.04, from: "2026-11-11" }],
     },
     {
-      id: "claude-fable-5.2",
+      pageLabel: "claude-fable-5.2",
       label: "Fable 5.2",
       rates: [{ multiplier: 3.2, from: "2026-11-11" }],
     },
     {
-      id: "gpt-6.1-sol",
+      pageLabel: "gpt-6.1-sol",
       label: "GPT-6.1 Sol",
       rates: [{ multiplier: 0.8, from: "2026-11-11" }],
     },
     {
-      id: "gpt-6-luna",
+      pageLabel: "gpt-6-luna",
       label: "GPT-6 Luna",
       rates: [{ multiplier: 0.04, from: "2026-11-11" }],
     },
     {
-      id: "gemini-4-carbon",
+      pageLabel: "gemini-4-carbon",
       label: "Gemini 4 Carbon",
       rates: [
         { multiplier: 0.8, from: "2026-11-11", until: "2026-12-01" },
@@ -122,37 +124,37 @@ export const MODEL_POOL_DATA: ModelPoolData = {
       ],
     },
     {
-      id: "gemini-3.8-flash",
+      pageLabel: "gemini-3.8-flash",
       label: "Gemini 3.8 Flash",
       rates: [{ multiplier: 0.3, from: "2026-11-11" }],
     },
     {
-      id: "grok-4.7",
+      pageLabel: "grok-4.7",
       label: "Grok 4.7",
       rates: [{ multiplier: 0.8, from: "2026-11-11" }],
     },
     {
-      id: "glm-5.3-flash",
+      pageLabel: "glm-5.3-flash",
       label: "GLM-5.3-Flash",
       rates: [{ multiplier: 0.06, from: "2026-11-11" }],
     },
     {
-      id: "minimax-m3.1-flash",
+      pageLabel: "minimax-m3.1-flash",
       label: "MiniMax M3.1 Flash",
       rates: [{ multiplier: 0.06, from: "2026-11-11" }],
     },
     {
-      id: "deepseek-v4.1-flash",
+      pageLabel: "deepseek-v4.1-flash",
       label: "DeepSeek V4.1 Flash",
       rates: [{ multiplier: 0.12, from: "2026-11-11" }],
     },
     {
-      id: "glm-5.3",
+      pageLabel: "glm-5.3",
       label: "GLM-5.3",
       rates: [{ multiplier: 0.56, from: "2026-11-11" }],
     },
     {
-      id: "kimi-k3.1-pro",
+      pageLabel: "kimi-k3.1-pro",
       label: "Kimi K3.1 Pro",
       rates: [{ multiplier: 0.8, from: "2026-11-11" }],
     },

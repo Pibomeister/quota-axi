@@ -1,5 +1,5 @@
 import { degradedSources } from "./lib/source-attempts.js";
-import { modelPoolMatchers } from "./model-pools.js";
+import { MODEL_POOL_DATA, modelPoolMatchers } from "./model-pools.js";
 import {
   computeEffectiveRunway,
   computeWindowPace,
@@ -92,7 +92,7 @@ function attachModelPools(
     if (models.length === 0) return entry;
     changed = true;
     const { scope, ...rest } = entry;
-    return { scope, models, ...rest };
+    return { scope, models, observed: MODEL_POOL_DATA.observed, ...rest };
   });
   return changed ? { ...semantics, effectiveAvailability } : semantics;
 }

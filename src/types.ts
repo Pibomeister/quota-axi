@@ -228,6 +228,17 @@ export type QuotaWindow = {
 
 export type EffectiveAvailability = {
   scope: string;
+  /**
+   * Recorded matchers for the models this scope limits. Present only on a
+   * Cursor or Factory scope in the dated catalog. A trailing `*` matches an
+   * id that starts with the text before it. Not a measurement.
+   */
+  models?: string[];
+  /**
+   * Calendar day the model-pool catalog was recorded. Present only beside
+   * `models`. Not a measurement, and not a claim the catalog is still current.
+   */
+  observed?: string;
   status: "known" | "unknown";
   effectivePercentRemaining?: number;
   boundedBy: string[];

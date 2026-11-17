@@ -1,4 +1,5 @@
 import { degradedSources } from "./lib/source-attempts.js";
+import { MODEL_POOL_DATA, modelPoolMatchers } from "./model-pools.js";
 import {
   computeEffectiveRunway,
   computeWindowPace,
@@ -56,9 +57,10 @@ export function withQuotaSemantics(
   return {
     ...withWindows,
     state: { ...provider.state, ...supersededSources(provider) },
-    quotaSemantics: provider.state.stale
-      ? staleSemantics(semantics)
-      : semantics,
+    quotaSemantics: attachModelPools(
+      provider.provider,
+      provider.state.stale ? staleSemantics(semantics) : semantics,
+    ),
   };
 }
 
@@ -74,6 +76,25 @@ function supersededSources(
   if (provider.state.stale || provider.state.status !== "fresh") return {};
   const degraded = degradedSources(provider.attempts);
   return degraded.length > 0 ? { degradedSources: degraded } : {};
+}
+
+/**
+ * Put the dated catalog on each scope it names. The map is recorded data, so
+ * a stale reading keeps it: which pool a model draws on is not a measurement.
+ */
+function attachModelPools(
+  provider: ProviderQuota["provider"],
+  semantics: QuotaSemantics,
+): QuotaSemantics {
+  let changed = false;
+  const effectiveAvailability = semantics.effectiveAvailability.map((entry) => {
+    const models = modelPoolMatchers(provider, entry.scope);
+    if (models.length === 0) return entry;
+    changed = true;
+    const { scope, ...rest } = entry;
+    return { scope, models, observed: MODEL_POOL_DATA.observed, ...rest };
+  });
+  return changed ? { ...semantics, effectiveAvailability } : semantics;
 }
 
 function staleSemantics(semantics: QuotaSemantics): QuotaSemantics {

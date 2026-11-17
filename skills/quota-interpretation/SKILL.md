@@ -44,11 +44,12 @@ Implemented in `src/pace.ts`:
 
 ### 1. Default TOON Report (`src/render.ts`)
 
-Structured into three concise decision blocks:
+Structured into three concise decision blocks, plus one conditional catalog block:
 
 1. `quota[]`: One fully populated row per measurable scope.
-2. `exhaustion[]`: Sparse block for finite-runway scopes, joined on `provider` + `scope`.
-3. `attention[]`: Sparse block capturing every non-nominal condition (degraded sources, warnings, unmeasurable scopes, soft expiry).
+2. `modelPools[]`: Present only when a shown Cursor or Factory scope carries recorded model matchers. Columns are `provider`, optional `accountKey`, `scope`, `models`, and `observed` (the catalog's recorded day). Not a measurement. A Cursor `grok-*` id is not in this catalog: no Cursor Grok model id is recorded, and `grok_bot` stays a separate meter whose relation to that house model is unsettled.
+3. `exhaustion[]`: Sparse block for finite-runway scopes, joined on `provider` + `scope`.
+4. `attention[]`: Sparse block capturing every non-nominal condition (degraded sources, warnings, unmeasurable scopes, soft expiry).
 
 **Core Invariants**:
 

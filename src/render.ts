@@ -99,6 +99,7 @@ export function renderQuotaToon(
           ),
         };
   const { quota, exhaustion, attention } = quotaBlocks(shown);
+  const modelPools = modelPoolRows(shown);
   const blocks = [
     encode({
       bin: collapseHome(binPath),
@@ -107,6 +108,7 @@ export function renderQuotaToon(
       generatedAt: response.generatedAt,
     }),
     encode({ quota }),
+    ...(modelPools.length > 0 ? [encode({ modelPools })] : []),
     encode({ exhaustion }),
     encode({ attention }),
   ];
@@ -165,6 +167,34 @@ function quotaBlocks(response: QuotaAxiResponse): ProviderBlocks {
     blocks.attention.push(...scopeAttention);
   }
   return blocks;
+}
+
+/**
+ * One row per scope that carries a recorded model catalog. It joins back to
+ * that scope on provider and scope, plus accountKey when the report expanded.
+ */
+type ModelPoolRow = {
+  provider: ProviderId;
+  accountKey?: string;
+  scope: string;
+  models: string;
+  observed: string;
+};
+
+function modelPoolRows(response: QuotaAxiResponse): ModelPoolRow[] {
+  const rows: ModelPoolRow[] = [];
+  for (const provider of response.providers) {
+    for (const scope of provider.quotaSemantics?.effectiveAvailability ?? []) {
+      if (!scope.models?.length || !scope.observed) continue;
+      rows.push({
+        ...providerColumns(provider),
+        scope: scope.scope,
+        models: scope.models.join(ID_SEPARATOR),
+        observed: scope.observed,
+      });
+    }
+  }
+  return rows;
 }
 
 function quotaRow(

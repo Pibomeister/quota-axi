@@ -240,7 +240,6 @@ function assembleReport(input: {
     if (
       row.kind === "weekly" &&
       row.error === null &&
-      !row.stale &&
       row.left_pct !== null &&
       row.left_pct < 10
     ) {

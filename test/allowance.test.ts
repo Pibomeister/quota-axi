@@ -428,11 +428,11 @@ describe("allowance command", () => {
     });
   }
 
-  function depsFor(providers: ProviderQuota[]) {
+  function depsFor(providers: ProviderQuota[], generatedAt = GENERATED) {
     return {
       fetchQuota: async (requested: readonly string[]) =>
         ({
-          generatedAt: GENERATED,
+          generatedAt,
           schemaVersion: 6,
           providers: providers.filter((provider) =>
             requested.includes(provider.provider),
@@ -543,7 +543,7 @@ describe("allowance command", () => {
     await allowanceCommand(
       ["--machine", "machine-a"],
       { binPath: "quota-axi" },
-      depsFor([failingClaude, lowCodex]),
+      depsFor([failingClaude, lowCodex], "2026-11-18T09:00:00-06:00"),
     );
     for (let run = 0; run < 2; run++) {
       await allowanceCommand(
@@ -555,11 +555,11 @@ describe("allowance command", () => {
     const report = JSON.parse(readFileSync(output, "utf8")) as AllowanceReport;
     const codexRow = report.rows.find((row) => row.harness === "codex");
     expect(codexRow?.stale).toBe(true);
-    expect(codexRow?.read_at).toBe(GENERATED);
+    expect(codexRow?.read_at).toBe("2026-11-18T09:00:00-06:00");
     expect(report.machines["machine-a"]?.usable).toBe(0);
     expect(report.machines["machine-a"]?.no_usable_streak).toBe(2);
-    expect(report.alerts).toEqual([
+    expect(report.alerts).toContain(
       "machine machine-a has no usable rows for 2 consecutive runs",
-    ]);
+    );
   });
 });

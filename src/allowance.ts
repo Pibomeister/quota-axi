@@ -25,11 +25,14 @@ export type AllowanceRow = {
   harness: ProviderId;
   /** Opaque local lane identity (`accountKey`); never an email or credential. */
   account: string;
+  /** The provider's own window id, so pools of the same kind stay distinct. */
   window: string;
+  kind: ProviderQuota["windows"][number]["kind"];
   used_pct: number | null;
   left_pct: number | null;
   resets_at: string | null;
   read_at: string;
+  stale: boolean;
   source: string;
   error: string | null;
   resets_cst: string | null;
@@ -62,7 +65,12 @@ export type AllowanceReport = {
     now: number | null;
     prev: number | null;
     drop: number | null;
-    rows: { machine: string; account: string; balance: number }[];
+    rows: {
+      machine: string;
+      account: string;
+      balance: number;
+      prev: number | null;
+    }[];
   };
 };
 
@@ -77,19 +85,29 @@ export const EMPTY_PRIOR_STATE: AllowancePriorState = {
   codexCredits: {},
 };
 
-function windowName(window: ProviderQuota["windows"][number]): string {
-  switch (window.kind) {
-    case "session":
-      return "5h";
-    case "weekly":
-      return "weekly";
-    case "monthly":
-      return "monthly";
-    case "credits":
-      return "credits";
-    default:
-      return window.id;
+const CENTRAL_TIME = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  timeZoneName: "longOffset",
+});
+
+/** ISO 8601 in America/Chicago local time with its DST-aware offset. */
+export function toCentralTime(iso: string | null): string | null {
+  if (iso === null) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const part: Record<string, string> = {};
+  for (const { type, value } of CENTRAL_TIME.formatToParts(date)) {
+    part[type] = value;
   }
+  const offset = (part.timeZoneName ?? "").replace("GMT", "") || "+00:00";
+  return `${part.year}-${part.month}-${part.day}T${part.hour}:${part.minute}:${part.second}${offset}`;
 }
 
 function isUsable(row: AllowanceRow): boolean {
@@ -108,36 +126,42 @@ function rowsForProvider(
 ): AllowanceRow[] {
   const account = provider.accountKey ?? "default";
   const source = provider.source ?? "quota-axi";
+  const stale = provider.state.stale;
+  const readAt = provider.state.refreshedAt ?? generatedAt;
+  const readingError = stale
+    ? (provider.state.error ?? provider.state.status)
+    : null;
   const rows: AllowanceRow[] = provider.windows.map((window) => ({
     machine,
     harness: provider.provider,
     account,
-    window: windowName(window),
+    window: window.id,
+    kind: window.kind,
     used_pct: window.percentUsed ?? null,
     // A shareOf window carries no percentRemaining by construction; a missing
     // remaining stays null rather than being derived from the used share.
     left_pct: window.percentRemaining ?? null,
     resets_at: window.resetsAt ?? null,
-    read_at: generatedAt,
+    read_at: readAt,
+    stale,
     source,
-    error: null,
-    resets_cst: window.resetsAt ?? null,
+    error: readingError,
+    resets_cst: toCentralTime(window.resetsAt ?? null),
   }));
-  if (
-    provider.credits?.remaining !== undefined &&
-    !rows.some((row) => row.window === "credits")
-  ) {
+  if (provider.credits?.remaining !== undefined) {
     rows.push({
       machine,
       harness: provider.provider,
       account,
-      window: "credits",
+      window: "paid_credits",
+      kind: "credits",
       used_pct: null,
       left_pct: null,
       resets_at: null,
-      read_at: generatedAt,
+      read_at: readAt,
+      stale,
       source,
-      error: null,
+      error: readingError,
       resets_cst: null,
       credits: {
         balance: provider.credits.remaining,
@@ -151,10 +175,12 @@ function rowsForProvider(
       harness: provider.provider,
       account,
       window: "*",
+      kind: "unknown",
       used_pct: null,
       left_pct: null,
       resets_at: null,
       read_at: generatedAt,
+      stale,
       source,
       error: provider.state.error ?? provider.state.status,
       resets_cst: null,
@@ -210,9 +236,14 @@ function assembleReport(input: {
     }
   }
   for (const row of input.rows) {
-    if (row.window === "weekly" && row.left_pct !== null && row.left_pct < 10) {
+    if (
+      row.kind === "weekly" &&
+      row.error === null &&
+      row.left_pct !== null &&
+      row.left_pct < 10
+    ) {
       alerts.push(
-        `${row.machine} ${row.harness}/${row.account} has under 10% weekly left (${row.left_pct}%)`,
+        `${row.machine} ${row.harness}/${row.account} ${row.window} has under 10% weekly left (${row.left_pct}%)`,
       );
     }
   }
@@ -226,12 +257,13 @@ function assembleReport(input: {
       machine: row.machine,
       account: row.account,
       balance: row.credits.balance,
+      prev: prior.codexCredits[`${row.machine}:${row.account}`] ?? null,
     }));
   let prev: number | null = null;
   let drop: number | null = null;
   for (const credit of creditRows) {
-    const before = prior.codexCredits[`${credit.machine}:${credit.account}`];
-    if (before === undefined) continue;
+    const before = credit.prev;
+    if (before === null) continue;
     const fallen = before - credit.balance;
     if (drop === null || fallen > drop) {
       drop = fallen;
@@ -285,7 +317,8 @@ export function buildAllowanceReport(input: {
 /**
  * Merge per-machine reports into one dashboard object (the `merge.py` and
  * `guard.py` roles): rows concatenate, machines and pools stay separate,
- * and streak/credit alerts recompute against `prior`.
+ * and streak/credit alerts recompute against `prior`. Without `prior`, each
+ * report's own stored streaks and prior credit balances carry over.
  */
 export function mergeAllowanceReports(
   reports: readonly AllowanceReport[],
@@ -299,8 +332,26 @@ export function mergeAllowanceReports(
         .sort()
         .at(-1) ?? "",
     rows,
-    ...(prior ? { prior } : {}),
+    prior: prior ?? carriedPriorState(reports),
   });
+}
+
+function carriedPriorState(
+  reports: readonly AllowanceReport[],
+): AllowancePriorState {
+  const noUsableStreak: Record<string, number> = {};
+  const codexCredits: Record<string, number> = {};
+  for (const report of reports) {
+    for (const [name, machine] of Object.entries(report.machines ?? {})) {
+      noUsableStreak[name] = Math.max(0, machine.no_usable_streak - 1);
+    }
+    for (const credit of report.codexCredits?.rows ?? []) {
+      if (credit.prev !== null && credit.prev !== undefined) {
+        codexCredits[`${credit.machine}:${credit.account}`] = credit.prev;
+      }
+    }
+  }
+  return { noUsableStreak, codexCredits };
 }
 
 /** Derive the next run's prior state from a finished report. */

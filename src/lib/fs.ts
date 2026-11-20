@@ -172,6 +172,25 @@ export function droidKeychainAccessMarkerPath(
   return join(cacheDirPath(), `droid-keychain-access-granted-${suffix}`);
 }
 
+/**
+ * The fixed allowance dashboard file a consumer reads: the
+ * `QUOTA_AXI_ALLOWANCE_PATH` override when set, else
+ * `$XDG_DATA_HOME/quota-axi/allowance.json` (or `~/.local/share/...`).
+ */
+export function allowanceFilePath(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const override = environment.QUOTA_AXI_ALLOWANCE_PATH?.trim();
+  if (override) return override;
+  const base = environment.XDG_DATA_HOME || join(homedir(), ".local", "share");
+  return join(base, "quota-axi", "allowance.json");
+}
+
+/** Prior-run allowance state beside the dashboard file it describes. */
+export function allowanceStatePath(outputPath: string): string {
+  return join(dirname(outputPath), "allowance-state.json");
+}
+
 /** Path of Muse's key-endpoint attempt ledger, beside the quota cache. */
 export function museKeyReadLedgerPath(): string {
   return join(cacheDirPath(), "muse-key-reads.json");

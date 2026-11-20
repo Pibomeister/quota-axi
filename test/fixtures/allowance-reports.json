@@ -1,0 +1,65 @@
+{
+  "reports": [
+    {
+      "generated_at": "2026-11-19T17:01:49-06:00",
+      "machine": "machine-a",
+      "rows": [
+        {
+          "machine": "machine-a",
+          "harness": "claude",
+          "account": "default",
+          "window": "weekly",
+          "kind": "weekly",
+          "used_pct": 45,
+          "left_pct": 55,
+          "resets_at": "2026-11-25T11:00:00.000Z",
+          "read_at": "2026-11-19T17:01:49-06:00",
+          "stale": false,
+          "source": "quota-axi",
+          "error": null,
+          "resets_cst": "2026-11-25T05:00:00-06:00"
+        },
+        {
+          "machine": "machine-a",
+          "harness": "codex",
+          "account": "default",
+          "window": "paid_credits",
+          "kind": "credits",
+          "used_pct": null,
+          "left_pct": null,
+          "resets_at": null,
+          "read_at": "2026-11-19T17:01:49-06:00",
+          "stale": false,
+          "source": "quota-axi",
+          "error": null,
+          "resets_cst": null,
+          "credits": {
+            "balance": 17325,
+            "unlimited": false
+          }
+        }
+      ]
+    },
+    {
+      "generated_at": "2026-11-19T17:01:49-06:00",
+      "machine": "machine-b",
+      "rows": [
+        {
+          "machine": "machine-b",
+          "harness": "kimi",
+          "account": "default",
+          "window": "weekly",
+          "kind": "weekly",
+          "used_pct": 95,
+          "left_pct": 5,
+          "resets_at": null,
+          "read_at": "2026-11-19T17:01:49-06:00",
+          "stale": false,
+          "source": "quota-axi",
+          "error": null,
+          "resets_cst": null
+        }
+      ]
+    }
+  ]
+}

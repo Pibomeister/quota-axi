@@ -1,12 +1,28 @@
 import { AxiError } from "axi-sdk-js";
 import { annotateQuotaAdvice } from "./advice.js";
 import {
+  parseAllowanceFlags,
   parseFlags,
   parseModelsFlags,
   readMaxAgeEnv,
   parseThemeValue,
   type QuotaFlags,
 } from "./args.js";
+import {
+  allowanceProvidersFor,
+  buildAllowanceReport,
+  parsePriorState,
+  priorStateFromReport,
+  type AllowanceRow,
+} from "./allowance.js";
+import {
+  allowanceFilePath,
+  allowanceStatePath,
+  ensurePrivateParent,
+  readUntracedJsonFile,
+} from "./lib/fs.js";
+import { chmodSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import {
   fetchLockPathFor,
   isSnapshotFile,
@@ -313,6 +329,75 @@ async function loadQuota(
   if (allFailed) process.exitCode = 1;
   else if (live) process.exitCode = undefined;
   return response;
+}
+
+export type AllowanceDeps = {
+  fetchQuota: typeof fetchQuota;
+};
+
+/**
+ * Write this machine's allowance dashboard JSON for an external consumer.
+ * The file holds only normalized non-secret rows; the prior-run state beside
+ * it holds only streak counts and credit balances. Both are `0600`.
+ */
+export async function allowanceCommand(
+  args: string[],
+  context: QuotaContext | undefined,
+  deps: AllowanceDeps = { fetchQuota },
+): Promise<string> {
+  void context;
+  const flags = parseAllowanceFlags(args);
+  const machine = flags.machine ?? hostname();
+  const output = allowanceFilePath();
+  const statePath = allowanceStatePath(output);
+  const prior = parsePriorState(readUntracedJsonFile(statePath));
+  const response = await deps.fetchQuota(
+    flags.providers,
+    {
+      allowKeychainPrompt: flags.allowKeychainPrompt,
+      refreshCredentials: !flags.noCredentialRefresh,
+    },
+    0,
+  );
+  const report = buildAllowanceReport({
+    machine,
+    generatedAt: response.generatedAt,
+    providers: allowanceProvidersFor(response),
+    keptRows: unrefreshedRows(
+      readUntracedJsonFile(output),
+      machine,
+      flags.providers,
+    ),
+    prior,
+  });
+  writePrivateJson(output, report);
+  writePrivateJson(statePath, priorStateFromReport(report));
+  return JSON.stringify(report, null, 2);
+}
+
+function unrefreshedRows(
+  previous: unknown,
+  machine: string,
+  refreshed: readonly ProviderId[],
+): AllowanceRow[] {
+  const rows = (previous as { rows?: unknown } | undefined)?.rows;
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter(
+      (row): row is AllowanceRow =>
+        typeof row === "object" &&
+        row !== null &&
+        (row as AllowanceRow).machine === machine &&
+        typeof (row as AllowanceRow).harness === "string" &&
+        !refreshed.includes((row as AllowanceRow).harness),
+    )
+    .map((row) => ({ ...row, stale: true }));
+}
+
+function writePrivateJson(path: string, value: unknown): void {
+  ensurePrivateParent(path);
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 export async function modelsCommand(

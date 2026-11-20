@@ -1,5 +1,6 @@
 import { runAxiCli } from "axi-sdk-js";
 import {
+  allowanceCommand,
   authCommand,
   modelsCommand,
   quotaCommand,
@@ -11,11 +12,11 @@ import { VERSION } from "./version.js";
 export const DESCRIPTION =
   "Report local agent-provider quota windows and model quota evidence.";
 
-export const TOP_HELP = `usage: quota-axi [quota|auth|models] [flags]
-commands[3]:
-  (none)=quota, auth, models
+export const TOP_HELP = `usage: quota-axi [quota|auth|models|allowance] [flags]
+commands[4]:
+  (none)=quota, auth, models, allowance
 output:
-  Default TOON reports local quota evidence. Providers that are not set up are omitted and counted in one help line; --full and an explicit --provider list them. --json keeps every provider and sets notSetUp true on the absent ones. models is a deterministic data join; --sort runway is explicit opt-in ordering. --tui renders a live human terminal report instead (r refreshes, q quits); providers that are not set up fold into one line that a or --all expands.
+  Default TOON reports local quota evidence. Providers that are not set up are omitted and counted in one help line; --full and an explicit --provider list them. --json keeps every provider and sets notSetUp true on the absent ones. models is a deterministic data join; --sort runway is explicit opt-in ordering. --tui renders a live human terminal report instead (r refreshes, q quits); providers that are not set up fold into one line that a or --all expands. allowance writes this machine's coding-allowance rows, per-pool summary, and alerts as JSON to $XDG_DATA_HOME/quota-axi/allowance.json (or ~/.local/share/quota-axi/allowance.json; QUOTA_AXI_ALLOWANCE_PATH or --output overrides) and prints the same JSON; it never prints or stores a token or account email.
   Repeated --provider flags accumulate in first-seen order: --provider zai --provider codex equals --provider zai,codex.
   --tui palette: --theme light|dark|system, else QUOTA_AXI_THEME, else dark. system follows OS appearance on each refresh; unavailable or unknown settings fall back to dark.
 notes:
@@ -24,8 +25,8 @@ notes:
   Every read asks the vendor unless --max-age <duration> or QUOTA_AXI_MAX_AGE (the flag wins) opts into reuse: a provider's last successful reading is then served while younger than that bound and the credential selection and local credential files are unchanged, and processes starting together make one vendor read. --full ignores QUOTA_AXI_MAX_AGE, and --tui r always reads the vendor. A reused reading stays fresh and carries reused true plus its original refreshedAt. QUOTA_AXI_SNAPSHOT=<cache-format file> answers every provider from that file instead, for tests and fixtures.
   Claude reports one lane, the profile this process selects, unless QUOTA_AXI_CLAUDE_PROFILES opts in: a path-delimiter-separated list of absolute Claude config directories (each exactly as CLAUDE_CONFIG_DIR would name it). Then the selected profile, the default profile when it holds a credential, and each listed directory become their own accountKey lanes; only the selected lane uses CLAUDE_CODE_OAUTH_TOKEN or delegated refresh, and --full --json names each lane's accountLocator. QUOTA_AXI_CLAUDE_SWAP=1 instead reports one claude-swap:<digest> lane per account the third-party claude-swap lists in \`cswap list --json\`, taking no credential from it. Failures are unavailable and never fall back to native Claude; auth and --no-credential-refresh do not run cswap.
   --profile-only requires explicit CLAUDE_CONFIG_DIR or CODEX_HOME plus exactly one matching provider. It reads only that credential file: no Keychain, Pi, CLI RPC, fallback, refresh, or cache. With --full --json, non-secret account identity, source, and attempts remain visible; tokens and file contents remain excluded, and ordinary output remains redacted.
-flags[17]:
-  --provider <${PROVIDER_IDS.join(",")}>, --json, --full, --tui, --refresh <30s-24h>, --once, --theme <light|dark|system>, --all, --max-age <0-1h>, --allow-keychain-prompt, --allow-claude-inference, --no-credential-refresh, --profile-only, --intelligence <high|medium|low>, --sort <runway>, --help, -v/--version
+flags[19]:
+  --provider <${PROVIDER_IDS.join(",")}>, --json, --full, --tui, --refresh <30s-24h>, --once, --theme <light|dark|system>, --all, --max-age <0-1h>, --allow-keychain-prompt, --allow-claude-inference, --no-credential-refresh, --profile-only, --intelligence <high|medium|low>, --sort <runway>, --machine <name>, --output <path>, --help, -v/--version
 examples:
   quota-axi
   quota-axi --provider claude
@@ -44,6 +45,8 @@ examples:
   quota-axi --json --max-age 90s
   quota-axi --tui --no-credential-refresh
   quota-axi auth
+  quota-axi allowance
+  quota-axi allowance --machine M4Max
   quota-axi models --intelligence high
   quota-axi models --sort runway
 `;
@@ -68,13 +71,17 @@ export async function main(options: MainOptions = {}): Promise<void> {
       quota: quotaCommand,
       auth: authCommand,
       models: modelsCommand,
+      allowance: allowanceCommand,
     },
     // `quota` is the implicit default command, so the bare-invocation home view
     // is never reached (see normalizeArgv); wiring it keeps the SDK contract.
     home: quotaCommand,
     resolveContext: () => ({ binPath }),
     getCommandHelp: (command) =>
-      command === "quota" || command === "auth" || command === "models"
+      command === "quota" ||
+      command === "auth" ||
+      command === "models" ||
+      command === "allowance"
         ? TOP_HELP
         : undefined,
   });
@@ -113,6 +120,7 @@ export function normalizeArgv(raw: string[]): string[] {
     first === "quota" ||
     first === "auth" ||
     first === "models" ||
+    first === "allowance" ||
     first === "update"
   ) {
     return raw;
@@ -157,6 +165,7 @@ function findCommand(raw: string[]): number {
       arg === "quota" ||
       arg === "auth" ||
       arg === "models" ||
+      arg === "allowance" ||
       arg === "update"
     ) {
       return index;

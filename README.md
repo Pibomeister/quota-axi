@@ -335,6 +335,7 @@ It is generated from `src/skill.ts` as a minimal stub: discovery frontmatter, wh
 | `models`         | Join curated model buckets with local quota evidence |
 | `update`         | Upgrade quota-axi to the latest published version    |
 | `update --check` | Report current vs. latest without installing         |
+| `allowance`      | Write this machine's allowance dashboard JSON        |
 
 ### Flags
 
@@ -357,6 +358,14 @@ It is generated from `src/skill.ts` as a minimal stub: discovery frontmatter, wh
 | `--sort runway`                                                                                                                                              | Explicitly sort `models` by documented usable-runway evidence                                                          |
 | `-h`, `--help`                                                                                                                                               | Print terse [AXI](https://axi.md) help                                                                                 |
 | `-v`, `-V`, `--version`                                                                                                                                      | Print version                                                                                                          |
+
+### Allowance dashboard (`allowance`)
+
+`quota-axi allowance` reports this machine's own coding-allowance rows for Claude, Codex (including paid credits), Kimi, Muse, Grok, agy, and Cursor, keeping every pool separate and never summing across harnesses. It reuses quota-axi's normalized provider readings rather than scraping a harness TUI, and it never prints or stores a token, a credential, or an account email: a row's `account` is the opaque local lane identity.
+
+It writes one JSON file at the fixed path `$XDG_DATA_HOME/quota-axi/allowance.json` (or `~/.local/share/quota-axi/allowance.json` when `XDG_DATA_HOME` is unset), prints the same JSON, and accepts `--machine <name>` (default: the OS hostname), `--output <path>`, and `--provider` to narrow the pools. `QUOTA_AXI_ALLOWANCE_PATH` overrides the fixed path. A consumer such as Grokmate reads that file; `mergeAllowanceReports` (exported from the package root) merges per-machine files without summing pools.
+
+The file holds `generated_at`, `machine`, `rows` (`machine`, `harness`, `account`, `window`, `used_pct`, `left_pct`, `resets_at`, `read_at`, `source`, `error`, plus a Codex `credits.balance` on the credits row), `machines` (per-machine row, usable, and error counts with the no-usable-row streak), a per-pool `summary`, `codexCredits` (current balance, prior balance, and drop), and `alerts`. A `shareOf` window never yields a `left_pct`. The alerts are: a machine with no usable rows for two consecutive runs, an account with under 10% weekly left, and a Codex credits drop of more than 1,000 since the prior run. The streak and prior-balance state lives beside the output in `allowance-state.json` and holds only counts and balances; both files are `0600`. It never selects Extra Usage or Add funds and never signs in or spends.
 
 ### Profile-only quota reads
 

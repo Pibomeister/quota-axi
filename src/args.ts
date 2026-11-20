@@ -1,4 +1,5 @@
 import { AxiError } from "axi-sdk-js";
+import { ALLOWANCE_PROVIDERS } from "./allowance.js";
 import { MODEL_CATALOG_PROVIDER_IDS } from "./models.js";
 import { parseProviders } from "./providers/index.js";
 import { TUI_THEME_SETTINGS, type TuiThemeSetting } from "./tui.js";
@@ -78,6 +79,73 @@ export function parseFlags(args: string[]): QuotaFlags {
     );
   }
   return flags;
+}
+
+export type AllowanceFlags = {
+  providers: ProviderId[];
+  machine?: string;
+  output?: string;
+  allowKeychainPrompt: boolean;
+  noCredentialRefresh: boolean;
+};
+
+/** Parse flags accepted by the `allowance` dashboard command. */
+export function parseAllowanceFlags(args: string[]): AllowanceFlags {
+  const providerValues: string[] = [];
+  let machine: string | undefined;
+  let output: string | undefined;
+  let allowKeychainPrompt = false;
+  let noCredentialRefresh = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--") continue;
+    if (arg === "--provider" || arg === "--machine" || arg === "--output") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new AxiError(`${arg} requires a value`, "VALIDATION_ERROR", [
+          `Pass ${arg}=... if the value begins with --`,
+        ]);
+      }
+      if (arg === "--provider") providerValues.push(value);
+      else if (arg === "--machine") machine = value;
+      else output = value;
+      index++;
+      continue;
+    }
+    if (arg.startsWith("--provider=")) {
+      providerValues.push(arg.slice("--provider=".length));
+      continue;
+    }
+    if (arg.startsWith("--machine=")) {
+      machine = arg.slice("--machine=".length);
+      continue;
+    }
+    if (arg.startsWith("--output=")) {
+      output = arg.slice("--output=".length);
+      continue;
+    }
+    if (arg === "--allow-keychain-prompt") {
+      allowKeychainPrompt = true;
+      continue;
+    }
+    if (arg === "--no-credential-refresh") {
+      noCredentialRefresh = true;
+      continue;
+    }
+    throw new AxiError(`unknown argument: ${arg}`, "VALIDATION_ERROR", [
+      "Run `quota-axi allowance --help` for supported flags",
+    ]);
+  }
+  const allowed = new Set<string>(ALLOWANCE_PROVIDERS);
+  return {
+    providers: parseProviderScope(providerValues, ALLOWANCE_PROVIDERS).filter(
+      (provider) => allowed.has(provider),
+    ),
+    ...(machine ? { machine } : {}),
+    ...(output ? { output } : {}),
+    allowKeychainPrompt,
+    noCredentialRefresh,
+  };
 }
 
 /** Parse flags accepted by the `models` evidence-join command. */

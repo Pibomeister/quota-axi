@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ALLOWANCE_PROVIDERS,
   buildAllowanceReport,
@@ -11,6 +11,7 @@ import {
   toCentralTime,
   type AllowanceReport,
 } from "../src/allowance.js";
+import { parseAllowanceFlags } from "../src/args.js";
 import { allowanceCommand } from "../src/commands.js";
 import type { ProviderQuota, QuotaAxiResponse } from "../src/types.js";
 
@@ -400,33 +401,53 @@ describe("allowance rows", () => {
 });
 
 describe("allowance command", () => {
-  it("writes the fixed JSON file privately and persists prior state", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function useTempOutput(): string {
     const dir = mkdtempSync(join(tmpdir(), "quota-axi-allowance-"));
     const output = join(dir, "allowance.json");
-    const response: QuotaAxiResponse = {
-      generatedAt: GENERATED,
-      schemaVersion: 6,
-      providers: [
-        quota({
-          provider: "codex",
-          windows: [
-            {
-              id: "weekly",
-              label: "Weekly",
-              kind: "weekly",
-              percentUsed: 20,
-              percentRemaining: 80,
-            },
-          ],
-          credits: { remaining: 17325, unlimited: false, unit: "credits" },
-        }),
+    vi.stubEnv("QUOTA_AXI_ALLOWANCE_PATH", output);
+    return output;
+  }
+
+  function codexReading(remaining: number): ProviderQuota {
+    return quota({
+      provider: "codex",
+      windows: [
+        {
+          id: "weekly",
+          label: "Weekly",
+          kind: "weekly",
+          percentUsed: 20,
+          percentRemaining: 80,
+        },
       ],
-    };
-    const deps = { fetchQuota: async () => response };
+      credits: { remaining, unlimited: false, unit: "credits" },
+    });
+  }
+
+  function depsFor(providers: ProviderQuota[]) {
+    return {
+      fetchQuota: async (requested: readonly string[]) =>
+        ({
+          generatedAt: GENERATED,
+          schemaVersion: 6,
+          providers: providers.filter((provider) =>
+            requested.includes(provider.provider),
+          ),
+        }) as QuotaAxiResponse,
+    } as unknown as Parameters<typeof allowanceCommand>[2];
+  }
+
+  it("writes the fixed JSON file privately and persists prior state", async () => {
+    const output = useTempOutput();
+    const providers = [codexReading(17325)];
     const text = await allowanceCommand(
-      ["--machine", "machine-a", "--output", output],
+      ["--machine", "machine-a"],
       { binPath: "quota-axi" },
-      deps,
+      depsFor(providers),
     );
     expect(JSON.parse(text).machine).toBe("machine-a");
     expect(existsSync(output)).toBe(true);
@@ -435,17 +456,68 @@ describe("allowance command", () => {
     expect(written.rows.some((row) => row.window === "paid_credits")).toBe(
       true,
     );
-    response.providers[0]!.credits = {
-      remaining: 15000,
-      unlimited: false,
-      unit: "credits",
-    };
     await allowanceCommand(
-      ["--machine", "machine-a", "--output", output],
+      ["--machine", "machine-a"],
       { binPath: "quota-axi" },
-      deps,
+      depsFor([codexReading(15000)]),
     );
     const second = JSON.parse(readFileSync(output, "utf8")) as AllowanceReport;
     expect(second.alerts.join(" ")).toContain("Codex credits dropped");
+  });
+
+  it("rejects a provider the allowance dashboard does not report", async () => {
+    const output = useTempOutput();
+    await expect(
+      allowanceCommand(
+        ["--machine", "machine-a", "--provider", "zai"],
+        { binPath: "quota-axi" },
+        depsFor([]),
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(existsSync(output)).toBe(false);
+    expect(() => parseAllowanceFlags(["--output", output])).toThrow(
+      "unknown argument: --output",
+    );
+  });
+
+  it("keeps other providers' rows and Codex state on a narrowed run", async () => {
+    const output = useTempOutput();
+    const claude = quota({
+      provider: "claude",
+      windows: [
+        {
+          id: "weekly",
+          label: "Weekly",
+          kind: "weekly",
+          percentUsed: 30,
+          percentRemaining: 70,
+        },
+      ],
+    });
+    await allowanceCommand(
+      ["--machine", "machine-a"],
+      { binPath: "quota-axi" },
+      depsFor([claude, codexReading(17325)]),
+    );
+    await allowanceCommand(
+      ["--machine", "machine-a", "--provider", "claude"],
+      { binPath: "quota-axi" },
+      depsFor([claude, codexReading(1)]),
+    );
+    const narrowed = JSON.parse(
+      readFileSync(output, "utf8"),
+    ) as AllowanceReport;
+    expect(narrowed.codexCredits.rows).toEqual([
+      { machine: "machine-a", account: "default", balance: 17325, prev: 17325 },
+    ]);
+    expect(narrowed.alerts).toEqual([]);
+    await allowanceCommand(
+      ["--machine", "machine-a"],
+      { binPath: "quota-axi" },
+      depsFor([claude, codexReading(15000)]),
+    );
+    const full = JSON.parse(readFileSync(output, "utf8")) as AllowanceReport;
+    expect(full.alerts.join(" ")).toContain("Codex credits dropped 2325");
+    expect(full.rows.filter((row) => row.harness === "claude")).toHaveLength(1);
   });
 });

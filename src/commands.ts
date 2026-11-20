@@ -13,6 +13,7 @@ import {
   buildAllowanceReport,
   parsePriorState,
   priorStateFromReport,
+  type AllowanceRow,
 } from "./allowance.js";
 import {
   allowanceFilePath,
@@ -347,7 +348,7 @@ export async function allowanceCommand(
   void context;
   const flags = parseAllowanceFlags(args);
   const machine = flags.machine ?? hostname();
-  const output = flags.output ?? allowanceFilePath();
+  const output = allowanceFilePath();
   const statePath = allowanceStatePath(output);
   const prior = parsePriorState(readUntracedJsonFile(statePath));
   const response = await deps.fetchQuota(
@@ -362,11 +363,33 @@ export async function allowanceCommand(
     machine,
     generatedAt: response.generatedAt,
     providers: allowanceProvidersFor(response),
+    keptRows: unrefreshedRows(
+      readUntracedJsonFile(output),
+      machine,
+      flags.providers,
+    ),
     prior,
   });
   writePrivateJson(output, report);
   writePrivateJson(statePath, priorStateFromReport(report));
   return JSON.stringify(report, null, 2);
+}
+
+function unrefreshedRows(
+  previous: unknown,
+  machine: string,
+  refreshed: readonly ProviderId[],
+): AllowanceRow[] {
+  const rows = (previous as { rows?: unknown } | undefined)?.rows;
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(
+    (row): row is AllowanceRow =>
+      typeof row === "object" &&
+      row !== null &&
+      (row as AllowanceRow).machine === machine &&
+      typeof (row as AllowanceRow).harness === "string" &&
+      !refreshed.includes((row as AllowanceRow).harness),
+  );
 }
 
 function writePrivateJson(path: string, value: unknown): void {

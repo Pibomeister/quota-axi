@@ -301,11 +301,15 @@ export function buildAllowanceReport(input: {
   machine: string;
   generatedAt: string;
   providers: ProviderQuota[];
+  keptRows?: readonly AllowanceRow[];
   prior?: AllowancePriorState;
 }): AllowanceReport {
-  const rows = input.providers.flatMap((provider) =>
-    rowsForProvider(input.machine, input.generatedAt, provider),
-  );
+  const rows = [
+    ...(input.keptRows ?? []),
+    ...input.providers.flatMap((provider) =>
+      rowsForProvider(input.machine, input.generatedAt, provider),
+    ),
+  ];
   return assembleReport({
     generatedAt: input.generatedAt,
     machine: input.machine,

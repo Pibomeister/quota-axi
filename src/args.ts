@@ -84,7 +84,6 @@ export function parseFlags(args: string[]): QuotaFlags {
 export type AllowanceFlags = {
   providers: ProviderId[];
   machine?: string;
-  output?: string;
   allowKeychainPrompt: boolean;
   noCredentialRefresh: boolean;
 };
@@ -93,13 +92,12 @@ export type AllowanceFlags = {
 export function parseAllowanceFlags(args: string[]): AllowanceFlags {
   const providerValues: string[] = [];
   let machine: string | undefined;
-  let output: string | undefined;
   let allowKeychainPrompt = false;
   let noCredentialRefresh = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--") continue;
-    if (arg === "--provider" || arg === "--machine" || arg === "--output") {
+    if (arg === "--provider" || arg === "--machine") {
       const value = args[index + 1];
       if (!value) {
         throw new AxiError(`${arg} requires a value`, "VALIDATION_ERROR", [
@@ -107,8 +105,7 @@ export function parseAllowanceFlags(args: string[]): AllowanceFlags {
         ]);
       }
       if (arg === "--provider") providerValues.push(value);
-      else if (arg === "--machine") machine = value;
-      else output = value;
+      else machine = value;
       index++;
       continue;
     }
@@ -118,10 +115,6 @@ export function parseAllowanceFlags(args: string[]): AllowanceFlags {
     }
     if (arg.startsWith("--machine=")) {
       machine = arg.slice("--machine=".length);
-      continue;
-    }
-    if (arg.startsWith("--output=")) {
-      output = arg.slice("--output=".length);
       continue;
     }
     if (arg === "--allow-keychain-prompt") {
@@ -136,13 +129,20 @@ export function parseAllowanceFlags(args: string[]): AllowanceFlags {
       "Run `quota-axi allowance --help` for supported flags",
     ]);
   }
-  const allowed = new Set<string>(ALLOWANCE_PROVIDERS);
+  const providers = parseProviderScope(providerValues, ALLOWANCE_PROVIDERS);
+  const unsupported = providers.find(
+    (provider) => !ALLOWANCE_PROVIDERS.includes(provider),
+  );
+  if (unsupported) {
+    throw new AxiError(
+      `allowance does not report provider: ${unsupported}`,
+      "VALIDATION_ERROR",
+      [`Allowance providers: ${ALLOWANCE_PROVIDERS.join(", ")}`],
+    );
+  }
   return {
-    providers: parseProviderScope(providerValues, ALLOWANCE_PROVIDERS).filter(
-      (provider) => allowed.has(provider),
-    ),
+    providers,
     ...(machine ? { machine } : {}),
-    ...(output ? { output } : {}),
     allowKeychainPrompt,
     noCredentialRefresh,
   };

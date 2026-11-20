@@ -113,6 +113,7 @@ export function toCentralTime(iso: string | null): string | null {
 function isUsable(row: AllowanceRow): boolean {
   return (
     row.error === null &&
+    !row.stale &&
     (row.used_pct !== null ||
       row.left_pct !== null ||
       row.credits?.balance !== undefined)
@@ -239,6 +240,7 @@ function assembleReport(input: {
     if (
       row.kind === "weekly" &&
       row.error === null &&
+      !row.stale &&
       row.left_pct !== null &&
       row.left_pct < 10
     ) {

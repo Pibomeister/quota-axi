@@ -382,14 +382,16 @@ function unrefreshedRows(
 ): AllowanceRow[] {
   const rows = (previous as { rows?: unknown } | undefined)?.rows;
   if (!Array.isArray(rows)) return [];
-  return rows.filter(
-    (row): row is AllowanceRow =>
-      typeof row === "object" &&
-      row !== null &&
-      (row as AllowanceRow).machine === machine &&
-      typeof (row as AllowanceRow).harness === "string" &&
-      !refreshed.includes((row as AllowanceRow).harness),
-  );
+  return rows
+    .filter(
+      (row): row is AllowanceRow =>
+        typeof row === "object" &&
+        row !== null &&
+        (row as AllowanceRow).machine === machine &&
+        typeof (row as AllowanceRow).harness === "string" &&
+        !refreshed.includes((row as AllowanceRow).harness),
+    )
+    .map((row) => ({ ...row, stale: true }));
 }
 
 function writePrivateJson(path: string, value: unknown): void {

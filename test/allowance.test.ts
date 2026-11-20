@@ -520,4 +520,46 @@ describe("allowance command", () => {
     expect(full.alerts.join(" ")).toContain("Codex credits dropped 2325");
     expect(full.rows.filter((row) => row.harness === "claude")).toHaveLength(1);
   });
+
+  it("marks carried rows stale so a failing narrowed run still builds the streak", async () => {
+    const output = useTempOutput();
+    const failingClaude = quota({
+      provider: "claude",
+      windows: [],
+      state: { status: "unavailable", stale: false, error: "no credential" },
+    });
+    const lowCodex = quota({
+      provider: "codex",
+      windows: [
+        {
+          id: "weekly",
+          label: "Weekly",
+          kind: "weekly",
+          percentUsed: 95,
+          percentRemaining: 5,
+        },
+      ],
+    });
+    await allowanceCommand(
+      ["--machine", "machine-a"],
+      { binPath: "quota-axi" },
+      depsFor([failingClaude, lowCodex]),
+    );
+    for (let run = 0; run < 2; run++) {
+      await allowanceCommand(
+        ["--machine", "machine-a", "--provider", "claude"],
+        { binPath: "quota-axi" },
+        depsFor([failingClaude, lowCodex]),
+      );
+    }
+    const report = JSON.parse(readFileSync(output, "utf8")) as AllowanceReport;
+    const codexRow = report.rows.find((row) => row.harness === "codex");
+    expect(codexRow?.stale).toBe(true);
+    expect(codexRow?.read_at).toBe(GENERATED);
+    expect(report.machines["machine-a"]?.usable).toBe(0);
+    expect(report.machines["machine-a"]?.no_usable_streak).toBe(2);
+    expect(report.alerts).toEqual([
+      "machine machine-a has no usable rows for 2 consecutive runs",
+    ]);
+  });
 });

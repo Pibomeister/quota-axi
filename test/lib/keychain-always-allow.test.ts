@@ -341,7 +341,7 @@ describe("macOS Keychain Always Allow", () => {
 
     expect(world.prompts).toBe(0);
     expect(world.setCalls).toHaveLength(0);
-    expect(world.commands).toEqual(["/usr/bin/security"]);
+    expect(world.commands).toEqual(["security"]);
   });
 
   it("does not rewrite or repair Keychain commands off macOS", async () => {

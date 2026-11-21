@@ -20,8 +20,13 @@ export function execFileText(
       ? { maxBufferBytes: optionsOrMaxBuffer }
       : optionsOrMaxBuffer;
   // apple-tool: authorizes Apple's signed security tool, not a PATH lookup.
+  // Only the value read is pinned. Presence and metadata calls stay on the
+  // command the caller passed, so a PATH sandbox still keeps them off the
+  // login keychain. The partition update reuses this same absolute path.
   const securityCommand =
-    process.platform === "darwin" && command === "security"
+    process.platform === "darwin" &&
+    command === "security" &&
+    readsGenericPasswordValue(args)
       ? "/usr/bin/security"
       : command;
   return spawnFileText(securityCommand, args, timeoutMs, options).then(
@@ -45,6 +50,26 @@ export function execFileText(
       return stdout;
     },
   );
+}
+
+function readsGenericPasswordValue(args: readonly string[]): boolean {
+  if (args[0] !== "find-generic-password") return false;
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "-w" || arg === "-g") return true;
+    if (
+      arg === "-a" ||
+      arg === "-s" ||
+      arg === "-c" ||
+      arg === "-D" ||
+      arg === "-l" ||
+      arg === "-j" ||
+      arg === "-u"
+    ) {
+      index += 1;
+    }
+  }
+  return false;
 }
 
 function spawnFileText(

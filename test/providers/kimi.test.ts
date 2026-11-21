@@ -2700,6 +2700,77 @@ describe("Kimi credential outcomes and cache policy", () => {
     expect(JSON.stringify(report)).not.toContain("rotated-cli-token");
   });
 
+  it("bounds refresh by the remaining total deadline without adopting a late result", async () => {
+    vi.useFakeTimers();
+    try {
+      const cliSource = cliCredentialSource({
+        status: "expired",
+        refreshable: true,
+        accessToken: "soft-expired-cli-token",
+      });
+      let finishRefresh!: (run: { status: "ran"; exitCode: number }) => void;
+      const delegate = vi.fn(
+        () =>
+          new Promise<{ status: "ran"; exitCode: number }>((resolve) => {
+            finishRefresh = resolve;
+          }),
+      );
+      const request = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            setTimeout(
+              () => resolve(new Response(null, { status: 401 })),
+              14_000,
+            );
+          }),
+      );
+      const remove = vi.fn();
+      let completed = false;
+      const reading = testAdapter({
+        broker: broker({ status: "missing" }),
+        cliCredentialSource: cliSource,
+        fetch: request,
+        runRefreshDelegate: delegate,
+        deleteCachedProvider: remove,
+        readCachedProvider: () => cachedQuota(),
+      }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+      void reading.then(() => {
+        completed = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(delegate).toHaveBeenCalledOnce();
+      expect(delegate.mock.calls[0]).toEqual([
+        expect.objectContaining({ waitBudgetMs: 1_000 }),
+      ]);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(completed).toBe(true);
+      const report = await reading;
+      expect(report).toMatchObject({
+        source: "cache",
+        windows: cachedQuota().windows,
+        state: { status: "stale", error: "kimi_refresh_unconfirmed" },
+      });
+      expect(report.state.authStatus).toBeUndefined();
+      expect(report.attempts).toContainEqual({
+        source: "kimi-cli-refresh",
+        status: "failed",
+        error: "refresh_timed_out",
+        degraded: false,
+      });
+
+      finishRefresh({ status: "ran", exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cliSource.resolve).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledOnce();
+      expect(remove).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("adopts a revoked tombstone written by Kimi Code CLI when the refresh token is rejected", async () => {
     let currentResolution: KimiCodeCliCredentialResolution = {
       status: "expired",

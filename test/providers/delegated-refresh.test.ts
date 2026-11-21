@@ -320,6 +320,55 @@ function processGroupOf(pid) {
       });
     });
 
+    it("finishes the RPC shutdown sequence after the refresh wait expires", async () => {
+      const release = join(tempDir, "release-rpc-response");
+      const finished = join(tempDir, "rpc-finished.json");
+      installNodeStub(
+        "vendorcli",
+        `const { existsSync, writeFileSync } = require("node:fs");
+const seen = [];
+const lifetime = setTimeout(() => process.exit(1), 2_000);
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const request = JSON.parse(line);
+  seen.push({ method: request.method, path: request.path });
+  const respond = () => process.stdout.write(JSON.stringify({ type: "http.res", id: request.id }) + "\\n");
+  if (request.id === "1") {
+    const pending = setInterval(() => {
+      if (!existsSync(${JSON.stringify(release)})) return;
+      clearInterval(pending);
+      respond();
+    }, 10);
+  } else {
+    respond();
+  }
+});
+process.stdin.on("end", () => {
+  clearTimeout(lifetime);
+  writeFileSync(${JSON.stringify(finished)}, JSON.stringify({ seen, stdinEnded: true }));
+});`,
+      );
+
+      const run = await runRefreshDelegate({
+        ...delegateFor("vendorcli", 25),
+        stdioRpcRequests: [
+          { id: "1", method: "GET", path: "/api/v1/oauth/usage" },
+          { id: "2", method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+        ],
+      });
+
+      expect(run).toEqual({ status: "unconfirmed", error: "refresh_timed_out" });
+      expect(existsSync(finished)).toBe(false);
+      writeFileSync(release, "ready");
+      await waitForFile(finished, 3_000);
+      expect(JSON.parse(readFileSync(finished, "utf8"))).toEqual({
+        seen: [
+          { method: "GET", path: "/api/v1/oauth/usage" },
+          { method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+        ],
+        stdinEnded: true,
+      });
+    });
+
     it("steps fixed stdio JSONL RPC requests sequentially and discards response bodies", async () => {
       const received = join(tempDir, "rpc-requests.json");
       installNodeStub(

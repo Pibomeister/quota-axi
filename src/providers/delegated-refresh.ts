@@ -162,8 +162,6 @@ export async function runRefreshDelegate(
       // Deliberately no signal. The vendor may be part way through a
       // single-use refresh-token exchange, and quota-axi is a reader: it stops
       // waiting and lets the process that owns the store finish on its own.
-      child.stdout?.removeAllListeners("data");
-      child.stdout?.resume();
       (
         child.stdin as (NodeJS.WritableStream & { unref?: () => void }) | null
       )?.unref?.();

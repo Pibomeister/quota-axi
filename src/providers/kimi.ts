@@ -21,6 +21,7 @@ import {
   sourceNames,
 } from "./common.js";
 import {
+  REFRESH_TIMED_OUT,
   refreshDelegateAttempt,
   runRefreshDelegate,
   type DelegatedRefreshRun,
@@ -357,6 +358,7 @@ async function acquireKimiQuota(
   options: ProviderOptions,
 ): Promise<ProviderQuota> {
   const controller = new AbortController();
+  const deadlineAt = performance.now() + dependencies.deadlineMs;
   const deadline = setTimeout(
     () => controller.abort(),
     dependencies.deadlineMs,
@@ -489,11 +491,17 @@ async function acquireKimiQuota(
                   1,
                   Math.min(
                     KIMI_REFRESH_WAIT_BUDGET_MS,
-                    dependencies.deadlineMs,
+                    deadlineAt - performance.now(),
                   ),
                 ),
               );
-              const run = await dependencies.runRefreshDelegate(delegate);
+              const run = await waitForDeadline(
+                dependencies.runRefreshDelegate(delegate),
+                controller.signal,
+              ).catch((error: unknown): DelegatedRefreshRun => {
+                if (!controller.signal.aborted) throw error;
+                return { status: "unconfirmed", error: REFRESH_TIMED_OUT };
+              });
               attempts.push(refreshDelegateAttempt(delegate, run));
               if (run.status === "unconfirmed") {
                 const unconfirmed = unconfirmedRefreshFailure();

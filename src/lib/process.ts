@@ -2,6 +2,7 @@ import { execFile, type ChildProcess } from "node:child_process";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import * as path from "node:path";
+import { finishSecurityValueRead } from "./macos-keychain-grant.js";
 
 export type ExecFileTextOptions = {
   maxBufferBytes?: number;
@@ -18,6 +19,40 @@ export function execFileText(
     typeof optionsOrMaxBuffer === "number"
       ? { maxBufferBytes: optionsOrMaxBuffer }
       : optionsOrMaxBuffer;
+  // apple-tool: authorizes Apple's signed security tool, not a PATH lookup.
+  const securityCommand =
+    process.platform === "darwin" && command === "security"
+      ? "/usr/bin/security"
+      : command;
+  return spawnFileText(securityCommand, args, timeoutMs, options).then(
+    async (stdout) => {
+      try {
+        await finishSecurityValueRead(
+          process.platform,
+          securityCommand,
+          args,
+          (followArgs, followTimeout) =>
+            spawnFileText(
+              securityCommand,
+              [...followArgs],
+              followTimeout,
+              options,
+            ),
+        );
+      } catch {
+        // The value read already succeeded. A partition update must not replace it.
+      }
+      return stdout;
+    },
+  );
+}
+
+function spawnFileText(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+  options: ExecFileTextOptions,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let invocation: ReturnType<typeof shimInvocation>;
     try {

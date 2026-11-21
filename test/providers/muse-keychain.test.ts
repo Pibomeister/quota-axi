@@ -206,6 +206,23 @@ describe("Muse Keychain credential source", () => {
     expect(JSON.stringify(report)).not.toContain(MINTED_API_KEY);
   });
 
+  it("a grant marker renamed with a .disabled suffix does not authorize a value read", async () => {
+    const { museKeychainAccessMarkerPath } =
+      await import("../../src/lib/fs.js");
+    const marker = museKeychainAccessMarkerPath(
+      "ai.meta.dev.credentials",
+      "meta",
+    );
+    mkdirSync(dirname(marker), { recursive: true });
+    writeFileSync(`${marker}.disabled-20261117`, "granted\n", { mode: 0o600 });
+    const { adapter, calls } = await keychainAdapter({ bundle: bundle() });
+
+    const report = await adapter.fetchQuota(OPTIONS);
+
+    expect(report.state.error).toBe("keychain_prompt_required");
+    expect(calls.every((call) => !call.args.includes("-w"))).toBe(true);
+  });
+
   it("a recorded grant marker lets a plain call read the value", async () => {
     mockSecurity({ bundle: bundle() });
     const muse = await museModule();

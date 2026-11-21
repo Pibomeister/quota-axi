@@ -833,10 +833,15 @@ describe("Claude native subprocess cancellation", () => {
         executable,
         `#!${process.execPath}
 const { spawn } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
+const { renameSync, writeFileSync } = require("node:fs");
 process.on("SIGTERM", () => {});
 const child = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); process.send("ready"); setInterval(() => {}, 1000);'], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
-child.once("message", () => writeFileSync(process.env.FIXTURE_READY, JSON.stringify({ pid: process.pid, descendant: child.pid, cwd: process.cwd() })));
+child.once("message", () => {
+  const payload = JSON.stringify({ pid: process.pid, descendant: child.pid, cwd: process.cwd() });
+  const temporary = process.env.FIXTURE_READY + ".tmp";
+  writeFileSync(temporary, payload);
+  renameSync(temporary, process.env.FIXTURE_READY);
+});
 setInterval(() => {}, 1000);
 `,
         { mode: 0o700 },
@@ -877,13 +882,18 @@ process.disconnect();
       runner.on("message", (message) => messages.push(message));
       let child: { pid: number; descendant: number; cwd: string } | undefined;
       try {
-        // The fixture must start tsx, Node, and a child before it is ready, which
-        // takes more than 4s on a busy host. This wait ends as soon as it is ready.
-        await vi.waitFor(() => expect(existsSync(ready)).toBe(true), {
-          timeout: 30_000,
-          interval: 20,
-        });
-        child = JSON.parse(readFileSync(ready, "utf8")) as typeof child;
+        // Startup runs tsx, Node, and a child, which takes more than 4s on a busy
+        // host. The fixture publishes ready.json with rename; retry until it parses
+        // so a poll cannot read a truncated write from the full suite.
+        await vi.waitFor(
+          () => {
+            child = JSON.parse(readFileSync(ready, "utf8")) as typeof child;
+          },
+          {
+            timeout: 30_000,
+            interval: 20,
+          },
+        );
         runner.kill(signal);
         const [code, exitSignal] = await closed;
         expect(hasHandler ? code : exitSignal).toBe(hasHandler ? 0 : signal);

@@ -185,18 +185,43 @@ async function resolveCredential(
       ? credential.access_token.trim()
       : "";
   const expiresAt = expirySeconds(credential?.expires_at);
-  if (!credential || !accessToken || expiresAt === undefined) {
+  if (!credential || expiresAt === undefined) {
+    return { status: "invalid" };
+  }
+  const refreshable = hasRefreshToken(credential);
+  if (!accessToken) {
+    /**
+     * Kimi Code CLI overwrites a rejected refresh token's credential file with
+     * `revokedTombstone` (`access_token: ""`, `refresh_token: ""`,
+     * `expires_at: 0`), after which its own `ensureFresh()` throws
+     * `Stored token for "<slot>" was rejected; re-login required.` That record
+     * is an expired, non-refreshable login rather than a malformed file.
+     */
+    if (
+      typeof credential.access_token === "string" &&
+      expiresAt <= 0 &&
+      !refreshable
+    ) {
+      return { status: "expired", refreshable: false };
+    }
     return { status: "invalid" };
   }
   if (expiresAt <= dependencies.now() / 1_000 + MINIMUM_FRESHNESS_SECONDS) {
     return {
       status: "expired",
-      refreshable: Object.hasOwn(credential, "refresh_token"),
+      refreshable,
       accessToken,
       baseUrl: environment.baseUrl,
     };
   }
   return { status: "available", accessToken, baseUrl: environment.baseUrl };
+}
+
+function hasRefreshToken(credential: Record<string, unknown>): boolean {
+  if (!Object.hasOwn(credential, "refresh_token")) return false;
+  const value = credential.refresh_token;
+  if (typeof value === "string") return value.trim().length > 0;
+  return value !== undefined && value !== null && value !== false;
 }
 
 function kimiCodeHome(

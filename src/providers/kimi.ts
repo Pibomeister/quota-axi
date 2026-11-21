@@ -15,7 +15,17 @@ import type {
 } from "../types.js";
 import { calendarMonthsBefore } from "../lib/time.js";
 import { VERSION } from "../version.js";
-import { servableStaleWindows, servableUntrustedWindowIds } from "./common.js";
+import {
+  servableStaleWindows,
+  servableUntrustedWindowIds,
+  sourceNames,
+} from "./common.js";
+import {
+  refreshDelegateAttempt,
+  runRefreshDelegate,
+  type DelegatedRefreshRun,
+  type RefreshDelegate,
+} from "./delegated-refresh.js";
 import { publishKimiReadingContextId } from "./kimi-cache-context.js";
 import {
   selectCredential,
@@ -64,10 +74,31 @@ const PI_KIMI_CACHE_CONTEXT_ID = createHash("sha256")
   )
   .digest("hex");
 const OPERATION_DEADLINE_MS = 15_000;
+const KIMI_REFRESH_WAIT_BUDGET_MS = 10_000;
 const RESPONSE_LIMIT_BYTES = 262_144;
 const FIVE_HOURS_SECONDS = 18_000;
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const USER_AGENT = `quota-axi/${VERSION}`;
+
+function kimiCliRefreshDelegate(
+  codeHome: string,
+  waitBudgetMs: number,
+): RefreshDelegate {
+  return {
+    source: "kimi-cli-refresh",
+    command: "kimi",
+    args: ["server", "ensure-daemon"],
+    waitBudgetMs,
+    env: {
+      KIMI_CODE_HOME: codeHome,
+      KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START: "0",
+    },
+    stdioRpcRequests: [
+      { id: "1", method: "GET", path: "/api/v1/oauth/usage" },
+      { id: "2", method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+    ],
+  };
+}
 
 const DURATION_MULTIPLIERS: Record<string, number> = {
   TIME_UNIT_SECOND: 1,
@@ -101,6 +132,9 @@ type KimiDependencies = {
   fetch: typeof globalThis.fetch;
   readCachedProvider: typeof readCachedProviderFromDisk;
   deleteCachedProvider: typeof deleteCachedProviderFromDisk;
+  runRefreshDelegate: (
+    delegate: RefreshDelegate,
+  ) => Promise<DelegatedRefreshRun>;
   now: () => number;
   deadlineMs: number;
 };
@@ -141,23 +175,33 @@ export function createKimiAdapter(
     fetch: globalThis.fetch,
     readCachedProvider: readCachedProviderFromDisk,
     deleteCachedProvider: deleteCachedProviderFromDisk,
+    runRefreshDelegate: (delegate) => runRefreshDelegate(delegate),
     now: Date.now,
     deadlineMs: OPERATION_DEADLINE_MS,
     ...overrides,
   };
   let inFlight: Promise<ProviderQuota> | undefined;
+  let inFlightRefresh: boolean | undefined;
 
   return {
     id: "kimi",
     label: "Kimi",
     isUncertainSkip: (attempt) =>
       attempt.error === KIMI_CODE_ENVIRONMENT_UNCONFIRMED,
-    fetchQuota(_options: ProviderOptions): Promise<ProviderQuota> {
-      if (inFlight) return inFlight;
-      const acquisition = acquireKimiQuota(dependencies).finally(() => {
-        if (inFlight === acquisition) inFlight = undefined;
-      });
+    fetchQuota(options: ProviderOptions): Promise<ProviderQuota> {
+      if (inFlight && inFlightRefresh === options.refreshCredentials) {
+        return inFlight;
+      }
+      const acquisition = acquireKimiQuota(dependencies, options).finally(
+        () => {
+          if (inFlight === acquisition) {
+            inFlight = undefined;
+            inFlightRefresh = undefined;
+          }
+        },
+      );
       inFlight = acquisition;
+      inFlightRefresh = options.refreshCredentials;
       return acquisition;
     },
     async inspectAuth(_options: ProviderOptions): Promise<AuthProviderReport> {
@@ -310,6 +354,7 @@ type KimiCandidate =
 
 async function acquireKimiQuota(
   dependencies: KimiDependencies,
+  options: ProviderOptions,
 ): Promise<ProviderQuota> {
   const controller = new AbortController();
   const deadline = setTimeout(
@@ -431,6 +476,119 @@ async function acquireKimiQuota(
               credentialPresent: true,
               cacheContextId,
             });
+            if (
+              softRefreshable &&
+              options.refreshCredentials &&
+              source === KIMI_CODE_CLI_CREDENTIAL_SOURCE &&
+              selection &&
+              !controller.signal.aborted
+            ) {
+              const delegate = kimiCliRefreshDelegate(
+                selection.codeHome,
+                Math.max(
+                  1,
+                  Math.min(
+                    KIMI_REFRESH_WAIT_BUDGET_MS,
+                    dependencies.deadlineMs,
+                  ),
+                ),
+              );
+              const run = await dependencies.runRefreshDelegate(delegate);
+              attempts.push(refreshDelegateAttempt(delegate, run));
+              if (run.status === "unconfirmed") {
+                const unconfirmed = unconfirmedRefreshFailure();
+                failures[failures.length - 1] = {
+                  failure: unconfirmed,
+                  credentialPresent: true,
+                  cacheContextId,
+                };
+                return { kind: "transient", error: unconfirmed.code };
+              }
+              if (run.status === "ran" && !controller.signal.aborted) {
+                const refreshed = await resolveKimiCandidate(
+                  source,
+                  selection,
+                  dependencies,
+                  controller.signal,
+                );
+                if (refreshed.status === "unavailable") {
+                  attempts.push({
+                    source,
+                    status: refreshed.attemptStatus,
+                    error: refreshed.failure.code,
+                    ...(refreshed.credentialPresent
+                      ? { credentialPresent: true }
+                      : {}),
+                  });
+                  failures[failures.length - 1] = {
+                    failure: refreshed.failure,
+                    credentialPresent: refreshed.credentialPresent,
+                    cacheContextId,
+                  };
+                  return refreshed.failure.definitiveAuth
+                    ? { kind: "rejected", error: refreshed.failure.code }
+                    : { kind: "transient", error: refreshed.failure.code };
+                }
+                if (
+                  refreshed.localState === "valid" ||
+                  refreshed.credential !== selected.credential
+                ) {
+                  attempts.push({ source, status: "failed" });
+                  try {
+                    const retryOutcome = await readKimiQuota(
+                      refreshed.credential,
+                      refreshed.quotaUrl,
+                      source,
+                      attempts,
+                      controller.signal,
+                      dependencies,
+                    );
+                    failures.pop();
+                    if (cacheContextId) {
+                      publishKimiReadingContextId(cacheContextId);
+                    }
+                    if (retryOutcome.kind === "no_quota") {
+                      return { kind: "live_no_quota" };
+                    }
+                    report = retryOutcome.result;
+                    return { kind: "quota", result: retryOutcome.result };
+                  } catch (retryError) {
+                    const retryFailure = asKimiFailure(retryError);
+                    const retrySoftRefreshable =
+                      retryFailure.definitiveAuth &&
+                      refreshed.localState === "expired" &&
+                      refreshed.refreshable === true;
+                    const retryEffective = retrySoftRefreshable
+                      ? refreshableExpiryFailure(source)
+                      : retryFailure;
+                    attempts[attempts.length - 1] = {
+                      source,
+                      status: "failed",
+                      error: retryEffective.code,
+                    };
+                    failures[failures.length - 1] = {
+                      failure: retryEffective,
+                      credentialPresent: true,
+                      cacheContextId,
+                    };
+                    return retryFailure.definitiveAuth
+                      ? { kind: "rejected", error: retryEffective.code }
+                      : { kind: "transient", error: retryEffective.code };
+                  }
+                } else if (refreshed.refreshable !== true) {
+                  attempts.push({
+                    source,
+                    status: "failed",
+                    error: failure.code,
+                  });
+                  failures[failures.length - 1] = {
+                    failure,
+                    credentialPresent: true,
+                    cacheContextId,
+                  };
+                }
+              }
+            }
             return failure.definitiveAuth
               ? { kind: "rejected", error: effective.code }
               : { kind: "transient", error: effective.code };
@@ -651,7 +809,7 @@ async function readKimiQuota(
         stale: false,
         refreshedAt,
         ...(untrustedWindowIds.length > 0 ? { untrustedWindowIds } : {}),
-        sourcesTried: attempts.map(({ source: name }) => name),
+        sourcesTried: sourceNames(attempts),
       },
       attempts,
     },
@@ -740,6 +898,13 @@ function refreshableExpiryFailure(source: string): KimiFailure {
       authStatus: "expired_refreshable",
     },
   );
+}
+
+function unconfirmedRefreshFailure(): KimiFailure {
+  return new KimiFailure("kimi_refresh_unconfirmed", {
+    status: "unavailable",
+    staleEligible: true,
+  });
 }
 
 function credentialFailureFor(
@@ -863,7 +1028,7 @@ function noQuotaReport(
       stale: false,
       refreshedAt: new Date(dependencies.now()).toISOString(),
       authStatus: "usable",
-      sourcesTried: attempts.map(({ source }) => source),
+      sourcesTried: sourceNames(attempts),
     },
     attempts,
   };
@@ -913,7 +1078,7 @@ function failureReport(
       error: failure.code,
       ...(failure.retryAfter ? { retryAfter: failure.retryAfter } : {}),
       ...(failure.authStatus ? { authStatus: failure.authStatus } : {}),
-      sourcesTried: attempts.map(({ source }) => source),
+      sourcesTried: sourceNames(attempts),
     },
     attempts,
   };
@@ -962,7 +1127,7 @@ function staleKimiReport(
       ...(retryAfter ? { retryAfter } : {}),
       ...(authStatus ? { authStatus } : {}),
       ...(untrustedWindowIds ? { untrustedWindowIds } : {}),
-      sourcesTried: [...attempts.map(({ source }) => source), "cache"],
+      sourcesTried: [...sourceNames(attempts), "cache"],
     },
     attempts,
   };

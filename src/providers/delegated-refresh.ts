@@ -57,6 +57,12 @@ import type { SourceAttempt } from "../types.js";
  * existing honest advice.
  */
 
+export type RefreshDelegateRpcRequest = {
+  id: string;
+  method: "GET" | "POST";
+  path: string;
+};
+
 export type RefreshDelegate = {
   /** Attempt name recorded in `attempts` and `sourcesTried`. */
   source: string;
@@ -68,6 +74,13 @@ export type RefreshDelegate = {
   waitBudgetMs: number;
   /** Extra environment forced onto the child, merged last. */
   env?: Readonly<Record<string, string>>;
+  /**
+   * Optional fixed, code-declared JSONL `http.req` frames for a non-interactive
+   * stdio daemon bridge (`kimi server ensure-daemon`). Sent sequentially as
+   * each matching `http.res` frame arrives; response bodies are discarded by a
+   * key-allowlist JSON reviver and never retained or parsed for credentials.
+   */
+  stdioRpcRequests?: readonly RefreshDelegateRpcRequest[];
 };
 
 export type DelegatedRefreshRun =
@@ -115,14 +128,19 @@ export async function runRefreshDelegate(
     return { status: "unavailable", error: REFRESH_COMMAND_NOT_FOUND };
   }
   return new Promise<DelegatedRefreshRun>((resolve) => {
+    const rpcRequests = delegate.stdioRpcRequests;
+    const useStdioRpc = Boolean(rpcRequests && rpcRequests.length > 0);
     let child: ChildProcess;
     try {
       child = spawn(executable, [...delegate.args], {
-        // No stdin: a vendor command that would prompt exits instead of hanging.
-        // No pipes either: vendor output is never a credential source, and a
-        // child quota-axi has stopped waiting for must not block writing to a
-        // pipe nobody drains.
-        stdio: ["ignore", "ignore", "ignore"],
+        // Without fixed RPC frames, give the child no stdin (so a vendor TUI
+        // or prompt exits instead of hanging) and no pipes. When fixed JSONL
+        // RPC frames are declared, pipe only stdin/stdout and discard response
+        // bodies through a key-allowlist reviver so vendor output is never a
+        // credential source.
+        stdio: useStdioRpc
+          ? ["pipe", "pipe", "ignore"]
+          : ["ignore", "ignore", "ignore"],
         // Its own process group, so a signal sent to quota-axi's group - the
         // Ctrl+C that quits a live `--tui` - cannot interrupt a token exchange.
         detached: true,
@@ -144,15 +162,123 @@ export async function runRefreshDelegate(
       // Deliberately no signal. The vendor may be part way through a
       // single-use refresh-token exchange, and quota-axi is a reader: it stops
       // waiting and lets the process that owns the store finish on its own.
+      child.stdout?.removeAllListeners("data");
+      child.stdout?.resume();
+      (
+        child.stdin as (NodeJS.WritableStream & { unref?: () => void }) | null
+      )?.unref?.();
+      (
+        child.stdout as (NodeJS.ReadableStream & { unref?: () => void }) | null
+      )?.unref?.();
       child.unref();
       settle({ status: "unconfirmed", error: REFRESH_TIMED_OUT });
     }, delegate.waitBudgetMs);
+
+    if (useStdioRpc && rpcRequests) {
+      driveStdioRpcSequence(child, rpcRequests);
+    }
 
     child.on("error", () =>
       settle({ status: "failed", error: REFRESH_SPAWN_FAILED }),
     );
     child.on("close", (exitCode) => settle({ status: "ran", exitCode }));
   });
+}
+
+const RPC_LINE_LIMIT_BYTES = 64 * 1024;
+
+function driveStdioRpcSequence(
+  child: ChildProcess,
+  requests: readonly RefreshDelegateRpcRequest[],
+): void {
+  const stdin = child.stdin;
+  const stdout = child.stdout;
+  if (!stdin || !stdout) return;
+
+  stdin.on("error", () => {
+    // An early child exit closes stdin; `close` settles the run.
+  });
+  stdout.on("error", () => {});
+
+  let step = 0;
+  const sendCurrent = () => {
+    const request = requests[step];
+    if (!request || stdin.destroyed || !stdin.writable) return;
+    try {
+      stdin.write(
+        `${JSON.stringify({
+          type: "http.req",
+          id: request.id,
+          method: request.method,
+          path: request.path,
+          headers: { host: "127.0.0.1" },
+        })}\n`,
+      );
+    } catch {
+      // Settled by child `close`.
+    }
+  };
+
+  let buffer = "";
+  let droppingOversizedLine = false;
+  const handleLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const expectedId = requests[step]?.id;
+    if (!expectedId) return;
+    let envelope: { type?: unknown; id?: unknown } | undefined;
+    try {
+      envelope = JSON.parse(trimmed, (key, value) =>
+        key === "" || key === "type" || key === "id" ? value : undefined,
+      ) as { type?: unknown; id?: unknown };
+    } catch {
+      return;
+    }
+    if (envelope?.type !== "http.res" || envelope.id !== expectedId) return;
+    step += 1;
+    if (step < requests.length) {
+      sendCurrent();
+      return;
+    }
+    try {
+      stdin.end();
+    } catch {
+      // Settled by child `close`.
+    }
+  };
+
+  stdout.setEncoding("utf8");
+  stdout.on("data", (chunk: string) => {
+    let remaining = chunk;
+    while (remaining.length > 0) {
+      const newlineIndex = remaining.indexOf("\n");
+      if (newlineIndex === -1) {
+        if (droppingOversizedLine) return;
+        if (buffer.length + remaining.length > RPC_LINE_LIMIT_BYTES) {
+          buffer = "";
+          droppingOversizedLine = true;
+          return;
+        }
+        buffer += remaining;
+        return;
+      }
+      const segment = remaining.slice(0, newlineIndex);
+      remaining = remaining.slice(newlineIndex + 1);
+      if (droppingOversizedLine) {
+        droppingOversizedLine = false;
+        continue;
+      }
+      if (buffer.length + segment.length > RPC_LINE_LIMIT_BYTES) {
+        buffer = "";
+        continue;
+      }
+      const line = buffer + segment;
+      buffer = "";
+      handleLine(line);
+    }
+  });
+
+  sendCurrent();
 }
 
 /**

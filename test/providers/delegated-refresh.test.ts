@@ -319,6 +319,72 @@ function processGroupOf(pid) {
         degraded: false,
       });
     });
+
+    it("steps fixed stdio JSONL RPC requests sequentially and discards response bodies", async () => {
+      const received = join(tempDir, "rpc-requests.json");
+      installNodeStub(
+        "vendorcli",
+        `const { writeFileSync } = require("node:fs");
+const seen = [];
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  const lines = buffer.split(/\\r?\\n/);
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const req = JSON.parse(line);
+    seen.push({ id: req.id, method: req.method, path: req.path, seenBeforeResponse: seen.length });
+    process.stdout.write(JSON.stringify({
+      type: "http.res",
+      id: req.id,
+      status: 200,
+      headers: { "x-secret": "must-not-be-retained" },
+      body: JSON.stringify({ access_token: "printed-by-rpc-body" }),
+    }) + "\\n");
+  }
+});
+process.stdin.on("end", () => {
+  writeFileSync(${JSON.stringify(received)}, JSON.stringify({ argv: process.argv.slice(2), envCatalog: process.env.KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START, seen }));
+  process.exit(0);
+});`,
+      );
+
+      const run = await runRefreshDelegate({
+        source: "kimi-cli-refresh",
+        command: "vendorcli",
+        args: ["server", "ensure-daemon"],
+        waitBudgetMs: 5_000,
+        env: { KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START: "0" },
+        stdioRpcRequests: [
+          { id: "1", method: "GET", path: "/api/v1/oauth/usage" },
+          { id: "2", method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+        ],
+      });
+
+      expect(run).toEqual({ status: "ran", exitCode: 0 });
+      expect(JSON.stringify(run)).not.toContain("printed-by-rpc-body");
+      expect(JSON.stringify(run)).not.toContain("must-not-be-retained");
+      expect(JSON.parse(readFileSync(received, "utf8"))).toEqual({
+        argv: ["server", "ensure-daemon"],
+        envCatalog: "0",
+        seen: [
+          {
+            id: "1",
+            method: "GET",
+            path: "/api/v1/oauth/usage",
+            seenBeforeResponse: 0,
+          },
+          {
+            id: "2",
+            method: "POST",
+            path: "/api/v1/shutdown?if_idle=true",
+            seenBeforeResponse: 1,
+          },
+        ],
+      });
+    });
   },
 );
 

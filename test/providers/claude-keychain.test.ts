@@ -266,6 +266,27 @@ describe("Claude macOS Keychain discovery", () => {
     });
   });
 
+  it("does not treat the unsuffixed Claude grant filename as the current marker", async () => {
+    mockItems(item());
+    const { cacheFilePath } = await import("../../src/lib/fs.js");
+    const legacy = join(
+      dirname(cacheFilePath()),
+      "claude-keychain-access-granted",
+    );
+    mkdirSync(dirname(legacy), { recursive: true });
+    writeFileSync(legacy, "granted\n", { mode: 0o600 });
+    const { inspectAuth } = await import("../../src/providers/claude.js");
+
+    const auth = await inspectAuth({ ...options, allowKeychainPrompt: false });
+
+    expect(auth.sources).toContainEqual({
+      source: "keychain",
+      status: "skipped",
+      error: "keychain_prompt_required",
+      credentialPresent: true,
+    });
+  });
+
   it("reuses a granted Keychain reading across back-to-back reads with --max-age", async () => {
     mockItems(item());
     const { claudeKeychainAccessMarkerPath } =

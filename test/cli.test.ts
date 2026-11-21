@@ -2894,10 +2894,14 @@ describe("report generatedAt", () => {
     const rolling = output.providers[0]?.windows.find(
       ({ id }) => id === "rolling",
     );
-    expect(rolling?.pace).toMatchObject({
-      status: "on_pace",
-      elapsedPercent: 0,
-    });
+    expect(rolling?.pace?.status).toBe("on_pace");
+    // The reset is "now + 5 h" after a 20ms wait. Exact 0 is the same instant;
+    // a just-opened cycle on a slow host is a tiny positive percent. 1% is
+    // three minutes into a five-hour window and is not just-opened.
+    const elapsedPercent = rolling?.pace?.elapsedPercent;
+    expect(typeof elapsedPercent).toBe("number");
+    expect(elapsedPercent).toBeGreaterThanOrEqual(0);
+    expect(elapsedPercent).toBeLessThan(1);
     // Zero burn: absent when no time has elapsed, 0 once a millisecond has.
     expect(rolling?.pace?.burnMultiple ?? 0).toBe(0);
   });

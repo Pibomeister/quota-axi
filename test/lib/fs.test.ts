@@ -100,6 +100,25 @@ describe("cache paths", () => {
     expect(defaultBob).not.toContain("bob");
     expect(suffixedAlice).not.toContain("abcdef12");
   });
+
+  it("pins Muse and Claude grant names to the current key", async () => {
+    const { claudeKeychainAccessMarkerPath, museKeychainAccessMarkerPath } =
+      await importFsWithHome("/Users/kun");
+    process.env.XDG_CACHE_HOME = "/tmp/quota-cache";
+
+    // Compact JSON. A space after the comma is a different file and would
+    // miss a grant already recorded for this service and account.
+    expect(
+      museKeychainAccessMarkerPath("ai.meta.dev.credentials", "meta"),
+    ).toBe(
+      "/tmp/quota-cache/quota-axi/muse-keychain-access-granted-8f688675eafae3924982e965511782f2f89131c6b0d669b2d3da63c888a934b9",
+    );
+    expect(
+      claudeKeychainAccessMarkerPath("fixture-user", "Claude Code-credentials"),
+    ).toBe(
+      "/tmp/quota-cache/quota-axi/claude-keychain-access-granted-e9c5dce8-account-d13a96877f2e264d",
+    );
+  });
 });
 
 describe("claudeCredentialContextId", () => {

@@ -29,9 +29,9 @@ import type { SourceAttempt } from "../types.js";
  *   cannot run; that delegated attempt fails and the provider falls back to
  *   its existing read-only report and advice. The no-shell guarantee is never
  *   weakened to work around this accepted platform degradation.
- * - no interactive surface: the child gets no stdin (so a vendor TUI or prompt
- *   exits instead of waiting), `TERM=dumb`, and the vendor's own documented
- *   "do not open a browser" environment variables.
+ * - no interactive surface: stdin is ignored unless fixed, code-declared RPC
+ *   frames drive a non-interactive bridge. No terminal input is forwarded.
+ *   `TERM=dumb` and the vendor's documented browser opt-outs are forced.
  * - a bounded wall-clock budget that quota-axi waits out but never enforces
  *   with a signal. The delegated command is the vendor performing a single-use
  *   OAuth refresh-token exchange against its own credential store; killing it
@@ -43,10 +43,11 @@ import type { SourceAttempt } from "../types.js";
  *   definitively failed. The child is spawned in its own process group for the
  *   same reason, so a Ctrl+C aimed at quota-axi (a live `--tui`, most of all)
  *   cannot land on a vendor mid-exchange either.
- * - the child's output is discarded at the operating system, not read.
- *   Credentials are never parsed out of vendor output; the refreshed value only
- *   ever comes from re-reading the vendor's own store. Owning no pipe also
- *   means a detached vendor can never block on one quota-axi stopped draining.
+ * - output is ignored unless fixed RPC frames require matching response ids.
+ *   The RPC reader discards response bodies and never extracts credentials;
+ *   refreshed credentials come only from re-reading the vendor's own store.
+ *   After timeout the unreferenced pipes keep draining while quota-axi runs,
+ *   so a late response can still advance the sequence and close stdin.
  * - at most one delegated refresh per credential source per quota read, which
  *   each caller enforces by delegating only on its single recovery path. It is
  *   deliberately per read rather than per process, so a long-running `--tui`
@@ -110,8 +111,8 @@ export const REFRESH_VENDOR_UNKNOWN = "refresh_vendor_processes_unknown";
 /**
  * Environment forced onto every delegated run. `NO_COLOR` and `TERM=dumb` keep
  * vendor output plain, and the remaining entries are the vendors' own opt-outs
- * for opening a browser. Combined with a closed stdin this keeps the delegated
- * command to a non-interactive rotation, never a sign-in flow.
+ * for opening a browser. Combined with ignored stdin or fixed RPC frames,
+ * this keeps the delegate non-interactive, never a sign-in flow.
  */
 const NON_INTERACTIVE_ENV: Readonly<Record<string, string>> = {
   NO_COLOR: "1",

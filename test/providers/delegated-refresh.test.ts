@@ -356,7 +356,10 @@ process.stdin.on("end", () => {
         ],
       });
 
-      expect(run).toEqual({ status: "unconfirmed", error: "refresh_timed_out" });
+      expect(run).toEqual({
+        status: "unconfirmed",
+        error: "refresh_timed_out",
+      });
       expect(existsSync(finished)).toBe(false);
       writeFileSync(release, "ready");
       await waitForFile(finished, 3_000);

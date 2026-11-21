@@ -23,9 +23,9 @@ export type KimiCodeCliCredentialResolution =
   | {
       status: "expired";
       /**
-       * True when the same record carries a `refresh_token`, so this soft
-       * expiry has a rotation path the vendor CLI owns. Presence only: the
-       * value is never read, rendered, or exchanged here.
+       * True when the same record has a non-empty `refresh_token`, so this
+       * soft expiry has a rotation path the vendor CLI owns. Its value is
+       * inspected only for presence, never retained, rendered, or exchanged.
        */
       refreshable: boolean;
       /**

@@ -319,6 +319,124 @@ function processGroupOf(pid) {
         degraded: false,
       });
     });
+
+    it("finishes the RPC shutdown sequence after the refresh wait expires", async () => {
+      const release = join(tempDir, "release-rpc-response");
+      const finished = join(tempDir, "rpc-finished.json");
+      installNodeStub(
+        "vendorcli",
+        `const { existsSync, writeFileSync } = require("node:fs");
+const seen = [];
+const lifetime = setTimeout(() => process.exit(1), 2_000);
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const request = JSON.parse(line);
+  seen.push({ method: request.method, path: request.path });
+  const respond = () => process.stdout.write(JSON.stringify({ type: "http.res", id: request.id }) + "\\n");
+  if (request.id === "1") {
+    const pending = setInterval(() => {
+      if (!existsSync(${JSON.stringify(release)})) return;
+      clearInterval(pending);
+      respond();
+    }, 10);
+  } else {
+    respond();
+  }
+});
+process.stdin.on("end", () => {
+  clearTimeout(lifetime);
+  writeFileSync(${JSON.stringify(finished)}, JSON.stringify({ seen, stdinEnded: true }));
+});`,
+      );
+
+      const run = await runRefreshDelegate({
+        ...delegateFor("vendorcli", 25),
+        stdioRpcRequests: [
+          { id: "1", method: "GET", path: "/api/v1/oauth/usage" },
+          { id: "2", method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+        ],
+      });
+
+      expect(run).toEqual({
+        status: "unconfirmed",
+        error: "refresh_timed_out",
+      });
+      expect(existsSync(finished)).toBe(false);
+      writeFileSync(release, "ready");
+      await waitForFile(finished, 3_000);
+      expect(JSON.parse(readFileSync(finished, "utf8"))).toEqual({
+        seen: [
+          { method: "GET", path: "/api/v1/oauth/usage" },
+          { method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+        ],
+        stdinEnded: true,
+      });
+    });
+
+    it("steps fixed stdio JSONL RPC requests sequentially and discards response bodies", async () => {
+      const received = join(tempDir, "rpc-requests.json");
+      installNodeStub(
+        "vendorcli",
+        `const { writeFileSync } = require("node:fs");
+const seen = [];
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  const lines = buffer.split(/\\r?\\n/);
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const req = JSON.parse(line);
+    seen.push({ id: req.id, method: req.method, path: req.path, seenBeforeResponse: seen.length });
+    process.stdout.write(JSON.stringify({
+      type: "http.res",
+      id: req.id,
+      status: 200,
+      headers: { "x-secret": "must-not-be-retained" },
+      body: JSON.stringify({ access_token: "printed-by-rpc-body" }),
+    }) + "\\n");
+  }
+});
+process.stdin.on("end", () => {
+  writeFileSync(${JSON.stringify(received)}, JSON.stringify({ argv: process.argv.slice(2), envCatalog: process.env.KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START, seen }));
+  process.exit(0);
+});`,
+      );
+
+      const run = await runRefreshDelegate({
+        source: "kimi-cli-refresh",
+        command: "vendorcli",
+        args: ["server", "ensure-daemon"],
+        waitBudgetMs: 5_000,
+        env: { KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START: "0" },
+        stdioRpcRequests: [
+          { id: "1", method: "GET", path: "/api/v1/oauth/usage" },
+          { id: "2", method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+        ],
+      });
+
+      expect(run).toEqual({ status: "ran", exitCode: 0 });
+      expect(JSON.stringify(run)).not.toContain("printed-by-rpc-body");
+      expect(JSON.stringify(run)).not.toContain("must-not-be-retained");
+      expect(JSON.parse(readFileSync(received, "utf8"))).toEqual({
+        argv: ["server", "ensure-daemon"],
+        envCatalog: "0",
+        seen: [
+          {
+            id: "1",
+            method: "GET",
+            path: "/api/v1/oauth/usage",
+            seenBeforeResponse: 0,
+          },
+          {
+            id: "2",
+            method: "POST",
+            path: "/api/v1/shutdown?if_idle=true",
+            seenBeforeResponse: 1,
+          },
+        ],
+      });
+    });
   },
 );
 

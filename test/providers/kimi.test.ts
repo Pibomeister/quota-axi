@@ -2619,6 +2619,337 @@ describe("Kimi credential outcomes and cache policy", () => {
       },
     ]);
   });
+
+  it("recovers live quota by delegating Kimi Code CLI token refresh when refreshCredentials is enabled", async () => {
+    let currentResolution: KimiCodeCliCredentialResolution = {
+      status: "expired",
+      refreshable: true,
+      accessToken: "soft-expired-cli-token",
+      baseUrl: "https://api.kimi.com/coding/v1",
+    };
+    const cliSource: KimiCodeCliCredentialSource = {
+      select: vi.fn(async () => TEST_SELECTION),
+      resolve: vi.fn(async () => currentResolution),
+      inspect: vi.fn(async () => "expired_refreshable" as const),
+    };
+    const delegate = vi.fn(async () => {
+      currentResolution = {
+        status: "available",
+        accessToken: "rotated-cli-token",
+        baseUrl: "https://api.kimi.com/coding/v1",
+      };
+      return { status: "ran" as const, exitCode: 0 };
+    });
+    const request = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Headers(init?.headers).get("authorization") ===
+        "Bearer rotated-cli-token"
+          ? jsonResponse(SUCCESS_PAYLOAD)
+          : new Response(null, { status: 401 }),
+    );
+    const remove = vi.fn();
+
+    const report = await testAdapter({
+      broker: broker({ status: "missing" }),
+      cliCredentialSource: cliSource,
+      fetch: request,
+      runRefreshDelegate: delegate,
+      deleteCachedProvider: remove,
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    expect(delegate).toHaveBeenCalledOnce();
+    expect(delegate).toHaveBeenCalledWith({
+      source: "kimi-cli-refresh",
+      command: "kimi",
+      args: ["server", "ensure-daemon"],
+      waitBudgetMs: 10_000,
+      env: {
+        KIMI_CODE_HOME: TEST_SELECTION.codeHome,
+        KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START: "0",
+      },
+      stdioRpcRequests: [
+        { id: "1", method: "GET", path: "/api/v1/oauth/usage" },
+        { id: "2", method: "POST", path: "/api/v1/shutdown?if_idle=true" },
+      ],
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(remove).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      source: "api",
+      state: {
+        status: "fresh",
+        stale: false,
+        sourcesTried: ["pi:kimi-coding", "kimi-code-cli", "kimi-cli-refresh"],
+      },
+      attempts: [
+        {
+          source: "pi:kimi-coding",
+          status: "skipped",
+          error: "kimi_credential_unavailable",
+        },
+        {
+          source: "kimi-code-cli",
+          status: "failed",
+          error: "kimi_code_cli_access_token_expired",
+        },
+        { source: "kimi-cli-refresh", status: "success" },
+        { source: "kimi-code-cli", status: "success" },
+      ],
+    });
+    expect(JSON.stringify(report)).not.toContain("soft-expired-cli-token");
+    expect(JSON.stringify(report)).not.toContain("rotated-cli-token");
+  });
+
+  it("bounds refresh by the remaining total deadline without adopting a late result", async () => {
+    vi.useFakeTimers();
+    try {
+      const cliSource = cliCredentialSource({
+        status: "expired",
+        refreshable: true,
+        accessToken: "soft-expired-cli-token",
+      });
+      let finishRefresh!: (run: { status: "ran"; exitCode: number }) => void;
+      const delegate = vi.fn(
+        () =>
+          new Promise<{ status: "ran"; exitCode: number }>((resolve) => {
+            finishRefresh = resolve;
+          }),
+      );
+      const request = vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            setTimeout(
+              () => resolve(new Response(null, { status: 401 })),
+              14_000,
+            );
+          }),
+      );
+      const remove = vi.fn();
+      let completed = false;
+      const reading = testAdapter({
+        broker: broker({ status: "missing" }),
+        cliCredentialSource: cliSource,
+        fetch: request,
+        runRefreshDelegate: delegate,
+        deleteCachedProvider: remove,
+        readCachedProvider: () => cachedQuota(),
+      }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+      void reading.then(() => {
+        completed = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(delegate).toHaveBeenCalledOnce();
+      expect(delegate.mock.calls[0]).toEqual([
+        expect.objectContaining({ waitBudgetMs: 1_000 }),
+      ]);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(completed).toBe(true);
+      const report = await reading;
+      expect(report).toMatchObject({
+        source: "cache",
+        windows: cachedQuota().windows,
+        state: { status: "stale", error: "kimi_refresh_unconfirmed" },
+      });
+      expect(report.state.authStatus).toBeUndefined();
+      expect(report.attempts).toContainEqual({
+        source: "kimi-cli-refresh",
+        status: "failed",
+        error: "refresh_timed_out",
+        degraded: false,
+      });
+
+      finishRefresh({ status: "ran", exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cliSource.resolve).toHaveBeenCalledOnce();
+      expect(request).toHaveBeenCalledOnce();
+      expect(remove).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adopts a revoked tombstone written by Kimi Code CLI when the refresh token is rejected", async () => {
+    let currentResolution: KimiCodeCliCredentialResolution = {
+      status: "expired",
+      refreshable: true,
+      accessToken: "soft-expired-cli-token",
+      baseUrl: "https://api.kimi.com/coding/v1",
+    };
+    const cliSource: KimiCodeCliCredentialSource = {
+      select: vi.fn(async () => TEST_SELECTION),
+      resolve: vi.fn(async () => currentResolution),
+      inspect: vi.fn(async () => "expired_refreshable" as const),
+    };
+    const delegate = vi.fn(async () => {
+      currentResolution = {
+        status: "expired",
+        refreshable: false,
+      };
+      return { status: "ran" as const, exitCode: 0 };
+    });
+    const request = vi.fn(async () => new Response(null, { status: 401 }));
+    const remove = vi.fn();
+
+    const report = await testAdapter({
+      broker: broker({ status: "missing" }),
+      cliCredentialSource: cliSource,
+      fetch: request,
+      runRefreshDelegate: delegate,
+      deleteCachedProvider: remove,
+      readCachedProvider: () => cachedQuota(),
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    expect(delegate).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith("kimi");
+    expect(report).toMatchObject({
+      source: "unavailable",
+      windows: [],
+      state: {
+        status: "auth_required",
+        stale: false,
+        error: "kimi_code_cli_credential_expired",
+        sourcesTried: ["pi:kimi-coding", "kimi-code-cli", "kimi-cli-refresh"],
+      },
+      attempts: [
+        {
+          source: "pi:kimi-coding",
+          status: "skipped",
+          error: "kimi_credential_unavailable",
+        },
+        {
+          source: "kimi-code-cli",
+          status: "failed",
+          error: "kimi_code_cli_access_token_expired",
+        },
+        { source: "kimi-cli-refresh", status: "success" },
+        {
+          source: "kimi-code-cli",
+          status: "skipped",
+          error: "kimi_code_cli_credential_expired",
+          credentialPresent: true,
+        },
+      ],
+    });
+  });
+
+  it("reports an unconfirmed Kimi refresh as kimi_refresh_unconfirmed and preserves cache", async () => {
+    const delegate = vi.fn(async () => ({
+      status: "unconfirmed" as const,
+      error: "refresh_timed_out",
+    }));
+    const request = vi.fn(async () => new Response(null, { status: 401 }));
+    const remove = vi.fn();
+
+    const report = await testAdapter({
+      broker: broker({ status: "missing" }),
+      cliCredentialSource: cliCredentialSource({
+        status: "expired",
+        refreshable: true,
+        accessToken: "soft-expired-cli-token",
+      }),
+      fetch: request,
+      runRefreshDelegate: delegate,
+      deleteCachedProvider: remove,
+      readCachedProvider: () => cachedQuota(),
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    expect(delegate).toHaveBeenCalledOnce();
+    expect(remove).not.toHaveBeenCalled();
+    expect(report).toMatchObject({
+      source: "cache",
+      windows: cachedQuota().windows,
+      state: {
+        status: "stale",
+        stale: true,
+        error: "kimi_refresh_unconfirmed",
+        sourcesTried: [
+          "pi:kimi-coding",
+          "kimi-code-cli",
+          "kimi-cli-refresh",
+          "cache",
+        ],
+      },
+      attempts: [
+        {
+          source: "pi:kimi-coding",
+          status: "skipped",
+          error: "kimi_credential_unavailable",
+        },
+        {
+          source: "kimi-code-cli",
+          status: "failed",
+          error: "kimi_code_cli_access_token_expired",
+        },
+        {
+          source: "kimi-cli-refresh",
+          status: "failed",
+          error: "refresh_timed_out",
+          degraded: false,
+        },
+      ],
+    });
+    expect(report.state.authStatus).toBeUndefined();
+  });
+
+  it("does not delegate Kimi CLI refresh for non-refreshable, stored-valid, transient, or Pi failures", async () => {
+    const delegate = vi.fn(async () => ({
+      status: "ran" as const,
+      exitCode: 0,
+    }));
+
+    // Stored-valid CLI token rejected with 401 -> hard rejection, no delegate
+    await testAdapter({
+      broker: broker({ status: "missing" }),
+      cliCredentialSource: cliCredentialSource({
+        status: "available",
+        accessToken: "revoked-valid-cli-token",
+      }),
+      fetch: vi.fn(async () => new Response(null, { status: 401 })),
+      runRefreshDelegate: delegate,
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    // Stored-expired CLI token without refresh token -> hard rejection, no delegate
+    await testAdapter({
+      broker: broker({ status: "missing" }),
+      cliCredentialSource: cliCredentialSource({
+        status: "expired",
+        refreshable: false,
+        accessToken: "expired-no-refresh-cli-token",
+      }),
+      fetch: vi.fn(async () => new Response(null, { status: 401 })),
+      runRefreshDelegate: delegate,
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    // Transient 503 on stored-expired refreshable CLI token -> no delegate
+    await testAdapter({
+      broker: broker({ status: "missing" }),
+      cliCredentialSource: cliCredentialSource({
+        status: "expired",
+        refreshable: true,
+        accessToken: "soft-expired-cli-token",
+      }),
+      fetch: vi.fn(async () => new Response(null, { status: 503 })),
+      runRefreshDelegate: delegate,
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    // Soft-expired Pi token -> no Kimi CLI delegate
+    await testAdapter({
+      broker: broker({
+        status: "expired",
+        refreshable: true,
+        credential: "soft-expired-pi-token",
+      }),
+      cliCredentialSource: cliCredentialSource({ status: "missing" }),
+      fetch: vi.fn(async () => new Response(null, { status: 401 })),
+      runRefreshDelegate: delegate,
+    }).fetchQuota({ allowKeychainPrompt: false, refreshCredentials: true });
+
+    expect(delegate).not.toHaveBeenCalled();
+  });
 });
 
 function testAdapter(
@@ -2636,6 +2967,10 @@ function testAdapter(
     ) as unknown as typeof fetch,
     readCachedProvider: () => undefined,
     deleteCachedProvider: () => undefined,
+    runRefreshDelegate: vi.fn(async () => ({
+      status: "unavailable" as const,
+      error: "refresh_command_not_found",
+    })),
     now: () => NOW,
     ...overrides,
   });

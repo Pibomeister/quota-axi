@@ -77,15 +77,10 @@ Shared machinery lives in `src/providers/delegated-refresh.ts`. It is the **sing
   3. The token was definitively rejected (HTTP 401/403) by the vendor's quota/user endpoint.
 - **Mechanism**: quota-axi executes the vendor CLI's own smallest non-interactive rotation command (e.g. `claude doctor`, `grok models`) and re-reads the file/store that CLI updated.
 - **Never exchange tokens**: quota-axi must never perform an OAuth refresh-token exchange itself. These tokens rotate on use; a second exchange signs the user out of the measured tool.
-- **Presence only**: Delegated refresh inspects the refresh token's presence only (`Object.hasOwn(credential, "refresh_token")`). quota-axi never retains, logs, renders, caches, or sends its value. Pi brokers may read a stored refresh value only to classify it as a usable literal, then discard it.
+- **Refresh-token inspection**: Follow [README Safety guarantees](../../README.md#safety-guarantees) for the permitted presence and usability checks.
 - **Never signal the child**: Quota-axi never signals or force-kills a delegated child process. The budget bounds only how long quota-axi waits. The child runs in its own process group (`detached: true`) so Ctrl+C on a live TUI does not abort it. If the command exceeds budget, resolve as `unconfirmed`/`refresh_timed_out` (reported as unmeasured or stale, never as sign-out, and never retiring cache).
 - **Claude safety check**: Before delegating Claude refresh, `src/lib/running-processes.ts` must confirm no Claude Code process is running, since Claude Code owns that session's refresh. If the process table cannot be listed, stay read-only. The check and spawn are not atomic - the check only narrows the common repeated `--tui` versus live-session collision; together with never signaling the delegate it is strictly safer than force-killing without adding a failure mode. Contract: [README Delegated credential refresh](../../README.md#delegated-credential-refresh).
-- **Approved delegates**: Only commands whose rotation behavior is empirically established from the vendor CLI are permitted:
-  - Claude: `claude doctor`
-  - Grok: `grok models`
-  - Codex: `app-server` JSON-RPC probe
-
-  All other providers (Cursor, Copilot, Kimi, Z.AI, Alibaba, OpenCode Go, Antigravity, Command Code, MiniMax, MiMo, DeepSeek, OpenRouter, ElevenLabs, Devin, Muse, Higgsfield, Factory Droid) remain strictly read-only.
+- **Approved delegates**: The provider inventory and vendor-owned recovery paths live in [README Delegated credential refresh](../../README.md#delegated-credential-refresh).
 
 - **Option gating**: Delegated refresh is gated by `ProviderOptions.refreshCredentials`. `--no-credential-refresh` disables it; the `auth` command always passes `false`. Tests must specify it explicitly to prevent accidental CLI spawning.
 

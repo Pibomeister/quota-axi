@@ -427,7 +427,7 @@ globalThis.fetch = async (input, init) => {
 
     const result = runCli(
       fixture,
-      ["--provider", "kimi", "--json", "--full"],
+      ["--provider", "kimi", "--json", "--full", "--no-credential-refresh"],
       rejectUsages(fixture),
       { PATH: vendorBin },
     );
@@ -482,7 +482,13 @@ globalThis.fetch = async (input, init) => {
     for (const json of [true, false]) {
       const stale = runCli(
         fixture,
-        ["--provider", "kimi", ...(json ? ["--json"] : []), "--full"],
+        [
+          "--provider",
+          "kimi",
+          ...(json ? ["--json"] : []),
+          "--full",
+          "--no-credential-refresh",
+        ],
         rejection,
         { PATH: vendorBin },
       );
@@ -574,7 +580,7 @@ globalThis.fetch = async (input, init) => {
 
     const result = runCli(
       fixture,
-      ["--provider", "kimi", "--json"],
+      ["--provider", "kimi", "--json", "--no-credential-refresh"],
       rejectUsages(fixture),
       { PATH: vendorStubs(fixture) },
     );

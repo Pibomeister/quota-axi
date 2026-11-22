@@ -93,6 +93,17 @@ describe("Kimi Code CLI credential discovery", () => {
         payload: { access_token: "", expires_at: NOW / 1_000 + 3_600 },
         status: "invalid",
       },
+      {
+        payload: {
+          access_token: "",
+          refresh_token: "",
+          expires_at: 0,
+          scope: "kimi-code",
+          token_type: "Bearer",
+          expires_in: 0,
+        },
+        status: "expired",
+      },
       { payload: { access_token: "token" }, status: "invalid" },
       {
         payload: { access_token: "token", expires_at: "not-an-expiry" },
@@ -100,6 +111,16 @@ describe("Kimi Code CLI credential discovery", () => {
       },
       {
         payload: { access_token: "token", expires_at: NOW / 1_000 - 1 },
+        status: "expired",
+        accessToken: "token",
+        refreshable: false,
+      },
+      {
+        payload: {
+          access_token: "token",
+          refresh_token: "",
+          expires_at: NOW / 1_000 - 1,
+        },
         status: "expired",
         accessToken: "token",
         refreshable: false,
@@ -135,7 +156,9 @@ describe("Kimi Code CLI credential discovery", () => {
       await expect(resolveOnce(source)).resolves.toEqual({
         status: fixture.status,
         ...(fixture.accessToken === undefined
-          ? {}
+          ? fixture.status === "expired"
+            ? { refreshable: false }
+            : {}
           : {
               accessToken: fixture.accessToken,
               baseUrl: "https://api.kimi.com/coding/v1",

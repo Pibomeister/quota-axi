@@ -1,4 +1,5 @@
 import { AxiError } from "axi-sdk-js";
+import { ALLOWANCE_PROVIDERS } from "./allowance.js";
 import { MODEL_CATALOG_PROVIDER_IDS } from "./models.js";
 import { parseProviders } from "./providers/index.js";
 import { TUI_THEME_SETTINGS, type TuiThemeSetting } from "./tui.js";
@@ -78,6 +79,73 @@ export function parseFlags(args: string[]): QuotaFlags {
     );
   }
   return flags;
+}
+
+export type AllowanceFlags = {
+  providers: ProviderId[];
+  machine?: string;
+  allowKeychainPrompt: boolean;
+  noCredentialRefresh: boolean;
+};
+
+/** Parse flags accepted by the `allowance` dashboard command. */
+export function parseAllowanceFlags(args: string[]): AllowanceFlags {
+  const providerValues: string[] = [];
+  let machine: string | undefined;
+  let allowKeychainPrompt = false;
+  let noCredentialRefresh = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--") continue;
+    if (arg === "--provider" || arg === "--machine") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new AxiError(`${arg} requires a value`, "VALIDATION_ERROR", [
+          `Pass ${arg}=... if the value begins with --`,
+        ]);
+      }
+      if (arg === "--provider") providerValues.push(value);
+      else machine = value;
+      index++;
+      continue;
+    }
+    if (arg.startsWith("--provider=")) {
+      providerValues.push(arg.slice("--provider=".length));
+      continue;
+    }
+    if (arg.startsWith("--machine=")) {
+      machine = arg.slice("--machine=".length);
+      continue;
+    }
+    if (arg === "--allow-keychain-prompt") {
+      allowKeychainPrompt = true;
+      continue;
+    }
+    if (arg === "--no-credential-refresh") {
+      noCredentialRefresh = true;
+      continue;
+    }
+    throw new AxiError(`unknown argument: ${arg}`, "VALIDATION_ERROR", [
+      "Run `quota-axi allowance --help` for supported flags",
+    ]);
+  }
+  const providers = parseProviderScope(providerValues, ALLOWANCE_PROVIDERS);
+  const unsupported = providers.find(
+    (provider) => !ALLOWANCE_PROVIDERS.includes(provider),
+  );
+  if (unsupported) {
+    throw new AxiError(
+      `allowance does not report provider: ${unsupported}`,
+      "VALIDATION_ERROR",
+      [`Allowance providers: ${ALLOWANCE_PROVIDERS.join(", ")}`],
+    );
+  }
+  return {
+    providers,
+    ...(machine ? { machine } : {}),
+    allowKeychainPrompt,
+    noCredentialRefresh,
+  };
 }
 
 /** Parse flags accepted by the `models` evidence-join command. */

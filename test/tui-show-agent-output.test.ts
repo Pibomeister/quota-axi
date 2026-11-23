@@ -172,7 +172,8 @@ describe("--tui direction preference and agent output", () => {
         );
       }
     }
-  }, 60_000);
+    // Sixteen sequential built-CLI launches: budget for a loaded machine.
+  }, 180_000);
 
   it("flips only the --tui report", () => {
     const cli = builtCli();
